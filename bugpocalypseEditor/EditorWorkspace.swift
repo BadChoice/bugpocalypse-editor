@@ -197,8 +197,15 @@ final class EditorWorkspace: ObservableObject {
     func addCell() {
         guard let document = selectedWorld else { return }
         let occupied = Set(document.definition.cells.map(\.coordinate))
-        var coordinate = WorldGridCoordinate(x: 0, y: 0)
-        while occupied.contains(coordinate) { coordinate.x += 1 }
+        let coordinate: WorldGridCoordinate
+        if let selectedCell,
+           let available = selectedCell.coordinate.neighbours.first(where: { !occupied.contains($0) }) {
+            coordinate = available
+        } else {
+            var fallback = WorldGridCoordinate(x: 0, y: 0)
+            while occupied.contains(fallback) { fallback.x += 1 }
+            coordinate = fallback
+        }
         var suffix = document.definition.cells.count + 1
         while document.definition.cell(id: "cell_\(suffix)") != nil { suffix += 1 }
         let cell = WorldCellDefinition(
