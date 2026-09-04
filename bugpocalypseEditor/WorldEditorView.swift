@@ -182,7 +182,7 @@ private struct WorldCellTile: View {
             Image(systemName: kindSymbol)
                 .font(.body.bold())
                 .padding(7)
-                .background(.black.opacity(0.65), in: Circle())
+                .background(kindSymbolColor, in: Circle())
                 .foregroundStyle(.white)
                 .allowsHitTesting(false)
         }
@@ -211,6 +211,13 @@ private struct WorldCellTile: View {
         case .survivor: "person.fill"
         case .exploration: "binoculars.fill"
         case .terrain: "leaf.fill"
+        }
+    }
+
+    private var kindSymbolColor: Color {
+        switch cell.kind {
+        case .mission, .eliteMission, .boss: .yellow
+        default: .black
         }
     }
 }
@@ -271,12 +278,12 @@ struct WorldInspector: View {
 
     @ViewBuilder private var worldFields: some View {
         Section("World") {
-            TextField("Name", text: worldBinding(\.displayName))
-            TextField("ID", text: worldBinding(\.id))
-            Picker("Status", selection: worldBinding(\.authoringStatus)) {
+            TextField("Name", text: worldBinding(\.displayName, fallback: workspace.selectedWorld?.definition.displayName ?? ""))
+            TextField("ID", text: worldBinding(\.id, fallback: workspace.selectedWorld?.definition.id ?? ""))
+            Picker("Status", selection: worldBinding(\.authoringStatus, fallback: workspace.selectedWorld?.definition.authoringStatus ?? .draft)) {
                 ForEach(AuthoringStatus.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
-            Stepper("Initial scout energy: \(workspace.selectedWorld?.definition.initialScoutEnergy ?? 0)", value: worldBinding(\.initialScoutEnergy), in: 0...999)
+            Stepper("Initial scout energy: \(workspace.selectedWorld?.definition.initialScoutEnergy ?? 0)", value: worldBinding(\.initialScoutEnergy, fallback: workspace.selectedWorld?.definition.initialScoutEnergy ?? 0), in: 0...999)
             LabeledContent("Schema", value: "v\(workspace.selectedWorld?.definition.schemaVersion ?? 0)")
         }
         Section("Map") {
@@ -289,15 +296,15 @@ struct WorldInspector: View {
     @ViewBuilder private var cellFields: some View {
         if let cell = workspace.selectedCell {
             Section("Identity") {
-                TextField("Name", text: cellBinding(\.displayName))
+                TextField("Name", text: cellBinding(\.displayName, fallback: cell.displayName))
                 TextField("ID", text: Binding(
                     get: { workspace.selectedCell?.id ?? "" },
                     set: workspace.renameSelectedCell
                 ))
-                Picker("Kind", selection: cellBinding(\.kind)) {
+                Picker("Kind", selection: cellBinding(\.kind, fallback: cell.kind)) {
                     ForEach(WorldCellKind.allCases, id: \.self) { Text(kindTitle($0)).tag($0) }
                 }
-                Picker("Tile", selection: cellBinding(\.tileName)) {
+                Picker("Tile", selection: cellBinding(\.tileName, fallback: cell.tileName)) {
                     if !workspace.availableWorldTiles.contains(cell.tileName) {
                         Text("Missing: \(cell.tileName)").tag(cell.tileName)
                     }
@@ -308,15 +315,15 @@ struct WorldInspector: View {
                 }
             }
             Section("Grid") {
-                Stepper("X: \(cell.coordinate.x)", value: coordinateBinding(\.x), in: -100...100)
-                Stepper("Y: \(cell.coordinate.y)", value: coordinateBinding(\.y), in: -100...100)
+                Stepper("X: \(cell.coordinate.x)", value: coordinateBinding(\.x, fallback: cell.coordinate.x), in: -100...100)
+                Stepper("Y: \(cell.coordinate.y)", value: coordinateBinding(\.y, fallback: cell.coordinate.y), in: -100...100)
                 let connectionCount = workspace.selectedWorld?.definition.edgeSharingCells(of: cell).count ?? 0
                 Text("\(connectionCount) automatic connection\(connectionCount == 1 ? "" : "s")")
                     .foregroundStyle(.secondary)
             }
             Section("Discovery") {
-                Toggle("Initially visible", isOn: cellBinding(\.isInitiallyRevealed))
-                Stepper("Scout energy: \(cell.scoutEnergyCost)", value: cellBinding(\.scoutEnergyCost), in: 0...999)
+                Toggle("Initially visible", isOn: cellBinding(\.isInitiallyRevealed, fallback: cell.isInitiallyRevealed))
+                Stepper("Scout energy: \(cell.scoutEnergyCost)", value: cellBinding(\.scoutEnergyCost, fallback: cell.scoutEnergyCost), in: 0...999)
             }
             if cell.missionId != nil || [.mission, .eliteMission, .boss].contains(cell.kind) {
                 Section("Mission") {
@@ -342,17 +349,29 @@ struct WorldInspector: View {
         }
     }
 
-    private func worldBinding<Value>(_ keyPath: WritableKeyPath<WorldDefinition, Value>) -> Binding<Value> {
+    private func worldBinding<Value>(
+        _ keyPath: WritableKeyPath<WorldDefinition, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
         Binding(
-            get: { workspace.selectedWorld!.definition[keyPath: keyPath] },
-            set: { value in workspace.updateSelectedWorld { $0[keyPath: keyPath] = value } }
+            get: { workspace.selectedWorld?.definition[keyPath: keyPath] ?? fallback },
+            set: { value in
+                guard workspace.selectedWorld != nil else { return }
+                workspace.updateSelectedWorld { $0[keyPath: keyPath] = value }
+            }
         )
     }
 
-    private func cellBinding<Value>(_ keyPath: WritableKeyPath<WorldCellDefinition, Value>) -> Binding<Value> {
+    private func cellBinding<Value>(
+        _ keyPath: WritableKeyPath<WorldCellDefinition, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
         Binding(
-            get: { workspace.selectedCell![keyPath: keyPath] },
-            set: { value in workspace.updateSelectedCell { $0[keyPath: keyPath] = value } }
+            get: { workspace.selectedCell?[keyPath: keyPath] ?? fallback },
+            set: { value in
+                guard workspace.selectedCell != nil else { return }
+                workspace.updateSelectedCell { $0[keyPath: keyPath] = value }
+            }
         )
     }
 
@@ -363,9 +382,12 @@ struct WorldInspector: View {
         )
     }
 
-    private func coordinateBinding(_ keyPath: WritableKeyPath<WorldGridCoordinate, Int>) -> Binding<Int> {
+    private func coordinateBinding(
+        _ keyPath: WritableKeyPath<WorldGridCoordinate, Int>,
+        fallback: Int
+    ) -> Binding<Int> {
         Binding(
-            get: { workspace.selectedCell!.coordinate[keyPath: keyPath] },
+            get: { workspace.selectedCell?.coordinate[keyPath: keyPath] ?? fallback },
             set: { value in
                 guard let cell = workspace.selectedCell else { return }
                 var coordinate = cell.coordinate

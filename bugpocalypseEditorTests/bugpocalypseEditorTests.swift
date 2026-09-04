@@ -138,6 +138,57 @@ struct bugpocalypseEditorTests {
         #expect(!startNeighbours.contains(fallbackCell.coordinate))
     }
 
+    @MainActor
+    @Test func loadsEditsAndSavesMissionContent() throws {
+        let root = try makeCheckout(includeMission: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = EditorWorkspace()
+        workspace.openProject(at: root)
+
+        #expect(workspace.missions.count == 1)
+        workspace.selectMission(workspace.missions[0])
+        #expect(workspace.selectedMission?.definition.metadata.displayName == "Test Mission")
+        #expect(workspace.diagnostics.isEmpty)
+
+        workspace.addMissionEvent(.zoomOut(.init(multiplier: 0.8, duration: 1)))
+        #expect(workspace.selectedMission?.definition.timeline.count == 2)
+        #expect(workspace.selectedMission?.isDirty == true)
+
+        workspace.saveSelectedMission()
+        #expect(workspace.selectedMission?.isDirty == false)
+
+        let saved = try ContentJSON.decode(
+            MissionDefinition.self,
+            from: Data(contentsOf: root.appendingPathComponent("godot/assets/missions/test/1.json"))
+        )
+        #expect(saved.timeline.count == 2)
+    }
+
+    private func makeCheckout(includeMission: Bool) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("godot/assets/worlds", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("BugpocalypseSwift", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: root.appendingPathComponent("godot/project.godot"))
+        try Data().write(to: root.appendingPathComponent("BugpocalypseSwift/Package.swift"))
+        try Data(worldJSON.utf8).write(to: root.appendingPathComponent("godot/assets/worlds/Test.json"))
+        if includeMission {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("godot/assets/missions/test", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            try Data(missionJSON.utf8).write(to: root.appendingPathComponent("godot/assets/missions/test/1.json"))
+        }
+        return root
+    }
+
     private var worldJSON: String {
         """
         {
@@ -154,6 +205,37 @@ struct bugpocalypseEditorTests {
             "isInitiallyRevealed": true,
             "scoutEnergyCost": 0,
             "neighbourIDs": []
+          }]
+        }
+        """
+    }
+
+    private var missionJSON: String {
+        """
+        {
+          "schemaVersion": 1,
+          "id": "test_1",
+          "authoringStatus": "ready",
+          "background": { "resourcePath": "res://assets/backgrounds/test.json", "seed": 1 },
+          "metadata": {
+            "locationId": "test",
+            "missionNumber": 1,
+            "displayName": "Test Mission",
+            "recommendedHeroLevel": 1,
+            "starObjectives": [
+              { "kind": "completeMission" },
+              { "kind": "finishWithHealth", "minimumPercentage": 0.75 },
+              { "kind": "defeatAllEnemies" }
+            ]
+          },
+          "completion": { "kind": "clearAllWaves" },
+          "timeline": [{
+            "at": 0,
+            "type": "spawnFormation",
+            "enemy": { "id": "fly_basic", "level": 1 },
+            "formation": { "kind": "line", "axis": "vertical", "count": 3, "spacing": 40 },
+            "path": { "kind": "straight", "speed": 120 },
+            "spawnPosition": { "edge": "right", "xOffset": 24, "y": 180 }
           }]
         }
         """

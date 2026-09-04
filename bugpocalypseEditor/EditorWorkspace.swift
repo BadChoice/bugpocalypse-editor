@@ -3,6 +3,12 @@ import BugpocalypseContent
 import Combine
 import Foundation
 
+// Keep the editor's topology vocabulary concise while the shared content
+// package names these specifically as edge neighbours.
+extension WorldGridCoordinate {
+    var neighbours: [WorldGridCoordinate] { edgeNeighbours }
+}
+
 enum EditorSection: String, CaseIterable, Hashable, Identifiable {
     case worlds, missions, formations, paths, backgrounds
 
@@ -23,6 +29,7 @@ enum EditorSection: String, CaseIterable, Hashable, Identifiable {
 enum EditorSelection: Hashable {
     case section(EditorSection)
     case world(URL)
+    case mission(URL)
 }
 
 @MainActor
@@ -47,11 +54,34 @@ final class WorldDocument: ObservableObject, Identifiable {
 }
 
 @MainActor
+final class MissionDocument: ObservableObject, Identifiable {
+    let fileURL: URL
+    @Published var definition: MissionDefinition
+    private(set) var savedDefinition: MissionDefinition
+
+    var id: URL { fileURL }
+    var isDirty: Bool { definition != savedDefinition }
+
+    init(fileURL: URL, definition: MissionDefinition) {
+        self.fileURL = fileURL
+        self.definition = definition
+        self.savedDefinition = definition
+    }
+
+    func markSaved() {
+        savedDefinition = definition
+        objectWillChange.send()
+    }
+}
+
+@MainActor
 final class EditorWorkspace: ObservableObject {
     @Published var projectRoot: URL?
     @Published var worlds: [WorldDocument] = []
+    @Published var missions: [MissionDocument] = []
     @Published var selection: EditorSelection?
     @Published var selectedCellID: String?
+    @Published var selectedMissionEventIndex: Int?
     @Published var searchText = ""
     @Published var errorMessage: String?
     @Published var statusMessage = "No project open"
@@ -64,12 +94,20 @@ final class EditorWorkspace: ObservableObject {
         return worldDocument(at: url)
     }
 
+    var selectedMission: MissionDocument? {
+        guard case .mission(let url) = selection else { return nil }
+        return missionDocument(at: url)
+    }
+
     var selectedCell: WorldCellDefinition? {
         guard let selectedCellID else { return nil }
         return selectedWorld?.definition.cell(id: selectedCellID)
     }
 
     var diagnostics: [ContentDiagnostic] {
+        if let mission = selectedMission {
+            return missionDiagnostics(for: mission.definition)
+        }
         guard let document = selectedWorld else { return [] }
         do {
             try document.definition.validate()
@@ -132,11 +170,27 @@ final class EditorWorkspace: ObservableObject {
                 return WorldDocument(fileURL: url, definition: try ContentJSON.decode(WorldDefinition.self, from: data))
             }.sorted { $0.definition.displayName.localizedStandardCompare($1.definition.displayName) == .orderedAscending }
 
+            let missionsURL = root.appendingPathComponent("godot/assets/missions", isDirectory: true)
+            let missionURLs = recursiveJSONFiles(at: missionsURL)
+            missions = try missionURLs.map { url in
+                let data = try Data(contentsOf: url)
+                return MissionDocument(
+                    fileURL: url,
+                    definition: try ContentJSON.decode(MissionDefinition.self, from: data)
+                )
+            }.sorted { lhs, rhs in
+                let a = lhs.definition.metadata
+                let b = rhs.definition.metadata
+                return a.locationId == b.locationId
+                    ? a.missionNumber < b.missionNumber
+                    : a.locationId.localizedStandardCompare(b.locationId) == .orderedAscending
+            }
+
             projectRoot = root
             UserDefaults.standard.set(root.path, forKey: rememberedRootKey)
             selection = worlds.first.map { .world($0.fileURL) } ?? .section(.worlds)
             selectedCellID = nil
-            statusMessage = "Loaded \(worlds.count) world\(worlds.count == 1 ? "" : "s")"
+            statusMessage = "Loaded \(worlds.count) world\(worlds.count == 1 ? "" : "s") and \(missions.count) missions"
         } catch {
             errorMessage = "Could not load worlds: \(error.localizedDescription)"
         }
@@ -146,9 +200,61 @@ final class EditorWorkspace: ObservableObject {
         worlds.first { $0.fileURL == url }
     }
 
+    func missionDocument(at url: URL) -> MissionDocument? {
+        missions.first { $0.fileURL == url }
+    }
+
     func selectWorld(_ document: WorldDocument) {
         selection = .world(document.fileURL)
         selectedCellID = nil
+    }
+
+    func selectMission(_ document: MissionDocument) {
+        selection = .mission(document.fileURL)
+        selectedCellID = nil
+        selectedMissionEventIndex = nil
+    }
+
+    func updateSelectedMission(_ change: (inout MissionDefinition) -> Void) {
+        guard let document = selectedMission else { return }
+        var value = document.definition
+        change(&value)
+        document.definition = value
+        objectWillChange.send()
+    }
+
+    func updateSelectedMissionEvent(_ change: (inout MissionTimelineEvent) -> Void) {
+        guard let index = selectedMissionEventIndex else { return }
+        updateSelectedMission { mission in
+            guard mission.timeline.indices.contains(index) else { return }
+            change(&mission.timeline[index])
+        }
+    }
+
+    func addMissionEvent(_ action: MissionTimelineEvent.Action) {
+        guard let mission = selectedMission else { return }
+        let at = ((mission.definition.timeline.map(\.at).max() ?? -2) + 2)
+        updateSelectedMission { $0.timeline.append(.init(at: max(0, at), action: action)) }
+        selectedMissionEventIndex = mission.definition.timeline.count - 1
+    }
+
+    func duplicateSelectedMissionEvent() {
+        guard let mission = selectedMission,
+              let index = selectedMissionEventIndex,
+              mission.definition.timeline.indices.contains(index) else { return }
+        var copy = mission.definition.timeline[index]
+        copy.at += 1
+        updateSelectedMission { $0.timeline.insert(copy, at: index + 1) }
+        selectedMissionEventIndex = index + 1
+    }
+
+    func deleteSelectedMissionEvent() {
+        guard let index = selectedMissionEventIndex else { return }
+        updateSelectedMission { mission in
+            guard mission.timeline.indices.contains(index) else { return }
+            mission.timeline.remove(at: index)
+        }
+        selectedMissionEventIndex = nil
     }
 
     func updateSelectedWorld(_ change: (inout WorldDefinition) -> Void) {
@@ -244,10 +350,37 @@ final class EditorWorkspace: ObservableObject {
         }
     }
 
+    func saveSelectedMission() {
+        guard let document = selectedMission else { return }
+        let errors = missionDiagnostics(for: document.definition).filter { $0.severity == .error }
+        guard errors.isEmpty else {
+            errorMessage = "The mission was not saved: fix \(errors.count) structural error\(errors.count == 1 ? "" : "s") first."
+            return
+        }
+        do {
+            let data = try ContentJSON.encode(document.definition)
+            try data.write(to: document.fileURL, options: .atomic)
+            document.markSaved()
+            objectWillChange.send()
+            statusMessage = "Saved \(document.fileURL.lastPathComponent)"
+        } catch {
+            errorMessage = "The mission was not saved: \(error.localizedDescription)"
+        }
+    }
+
+    func saveSelectedDocument() {
+        if selectedMission != nil { saveSelectedMission() } else { saveSelectedWorld() }
+    }
+
     func assetURL(for tileName: String) -> URL? {
         guard let projectRoot else { return nil }
         let url = projectRoot.appendingPathComponent("assets").appendingPathComponent(tileName)
         return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func enemyAssetURL(for enemyID: String) -> URL? {
+        guard let entry = EnemyCatalogue.entry(for: enemyID) else { return nil }
+        return assetURL(for: entry.previewAssetName + ".png")
     }
 
     /// Tile resources the world editor can author. Paths stay relative to the
@@ -271,6 +404,67 @@ final class EditorWorkspace: ObservableObject {
     private func isValidProjectRoot(_ url: URL) -> Bool {
         ["godot/project.godot", "godot/assets", "BugpocalypseSwift/Package.swift"]
             .allSatisfy { fileManager.fileExists(atPath: url.appendingPathComponent($0).path) }
+    }
+
+    private func recursiveJSONFiles(at directory: URL) -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return enumerator.compactMap { $0 as? URL }
+            .filter { $0.pathExtension.lowercased() == "json" }
+    }
+
+    private func missionDiagnostics(for mission: MissionDefinition) -> [ContentDiagnostic] {
+        var result: [ContentDiagnostic] = []
+        func add(_ severity: ContentSeverity, _ code: String, _ message: String, _ path: [String] = []) {
+            result.append(.init(
+                severity: severity,
+                code: code,
+                message: message,
+                location: .init(documentID: mission.id, path: path)
+            ))
+        }
+        if mission.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            add(.error, "mission.id.empty", "Mission ID cannot be empty.", ["id"])
+        }
+        if mission.metadata.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            add(.error, "mission.name.empty", "Mission name cannot be empty.", ["metadata", "displayName"])
+        }
+        if mission.metadata.missionNumber < 1 {
+            add(.error, "mission.number.invalid", "Mission number must be at least 1.", ["metadata", "missionNumber"])
+        }
+        if mission.metadata.starObjectives.isEmpty {
+            add(.warning, "mission.objectives.empty", "Add star objectives before marking this mission ready.", ["metadata", "starObjectives"])
+        }
+        if mission.authoringStatus == .ready && mission.metadata.starObjectives.count != 3 {
+            add(.error, "mission.objectives.count", "Ready missions must define exactly three star objectives.", ["metadata", "starObjectives"])
+        }
+        if mission.authoringStatus == .ready && !mission.metadata.starObjectives.contains(where: { $0.kind == .completeMission }) {
+            add(.error, "mission.objectives.completion", "A ready mission must award a star for completion.", ["metadata", "starObjectives"])
+        }
+        if mission.timeline.isEmpty {
+            add(mission.authoringStatus == .ready ? .error : .warning, "mission.timeline.empty", "The mission timeline is empty.", ["timeline"])
+        }
+        for (index, event) in mission.timeline.enumerated() {
+            let path = ["timeline", "\(index)"]
+            if !event.at.isFinite || event.at < 0 {
+                add(.error, "mission.event.time", "Event \(index + 1) has an invalid time.", path + ["at"])
+            }
+            if case let .spawnFormation(spawn) = event.action {
+                if EnemyCatalogue.entry(for: spawn.enemy.id) == nil {
+                    add(.error, "mission.enemy.unknown", "Event \(index + 1) uses unknown enemy '\(spawn.enemy.id)'.", path + ["enemy"])
+                }
+                if spawn.enemy.level < 1 {
+                    add(.error, "mission.enemy.level", "Enemy level must be at least 1.", path + ["enemy", "level"])
+                }
+                if spawn.formation.offsets().isEmpty {
+                    add(.error, "mission.formation.empty", "A spawn formation needs at least one member.", path + ["formation"])
+                }
+            }
+        }
+        return result
     }
 
 }
