@@ -444,8 +444,10 @@ The developer can:
   are required in the first visual timeline release.
 - Spawn events select reusable formations and paths, then expose visible typed
   overrides.
-- Drop assignment uses stable member IDs when available and displays member
-  indices for migrated content.
+- Drop assignment uses zero-based member indices. An event permits one
+  guaranteed drop per member; the index must resolve inside the formation's
+  current member count. See `drop-authoring.md` for the editor contract and
+  deferred probabilistic-loot design.
 
 ### 7.5 Mission preview
 
@@ -460,8 +462,9 @@ The native preview is a deterministic `640 x 360` geometry-and-timing simulator:
   missing;
 - member IDs/indices, anchors, path traces, and off-screen guides.
 
-It does not simulate attacks, health, collisions, drops, abilities, or combat
-AI. Those are tested through the real game.
+It does not simulate attacks, health, collisions, pickup release/collection,
+abilities, or combat AI. It does show static badges for authored drops. Those
+systems are tested through the real game.
 
 ### 7.6 Formation/path editor
 

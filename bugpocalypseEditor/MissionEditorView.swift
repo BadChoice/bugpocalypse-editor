@@ -249,6 +249,13 @@ private struct MissionPreview: View {
                 x: ((start.x + (end.x - start.x) * amount) - first.x) * 640,
                 y: ((start.y + (end.y - start.y) * amount) - first.y) * 360
             )
+        case let .bezier(value):
+            guard value.duration > 0 else { return .init(x: 0, y: 0) }
+            let point = value.point(at: elapsed / value.duration)
+            return .init(
+                x: (point.x - value.start.x) * 640,
+                y: (point.y - value.start.y) * 360
+            )
         }
     }
 }
@@ -439,6 +446,9 @@ struct MissionInspector: View {
             TextField("Duration (seconds)", value: waypointBinding(\.duration, fallback: value.duration), format: .number)
             LabeledContent("Points", value: "\(value.points.count)")
             Text("Waypoint handles will become draggable in the path-authoring pass.").font(.caption).foregroundStyle(.secondary)
+        case let .bezier(value):
+            TextField("Duration (seconds)", value: bezierBinding(\.duration, fallback: value.duration), format: .number)
+            Text("Edit this curve's handles in the Paths editor.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -527,6 +537,7 @@ struct MissionInspector: View {
     private func straightBinding<Value>(_ kp: WritableKeyPath<StraightPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .straight(v) = $0 { v } else { nil } }, MovementPathDefinition.straight, kp, fallback: fallback) }
     private func sineBinding<Value>(_ kp: WritableKeyPath<SinePath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .sine(v) = $0 { v } else { nil } }, MovementPathDefinition.sine, kp, fallback: fallback) }
     private func waypointBinding<Value>(_ kp: WritableKeyPath<WaypointPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .waypoints(v) = $0 { v } else { nil } }, MovementPathDefinition.waypoints, kp, fallback: fallback) }
+    private func bezierBinding<Value>(_ kp: WritableKeyPath<BezierPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .bezier(v) = $0 { v } else { nil } }, MovementPathDefinition.bezier, kp, fallback: fallback) }
 
     private var occupiedSlotsBinding: Binding<String> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .slottedLine(v) = spawn.formation { v.occupiedSlots.map(String.init).joined(separator: ", ") } else { "" } }, set: { text in mutateSpawn { spawn in guard case var .slottedLine(v) = spawn.formation else { return }; v.occupiedSlots = text.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }; spawn.formation = .slottedLine(v) } }) }
     private var optionalSeedBinding: Binding<Int> { Binding(
@@ -542,6 +553,6 @@ struct MissionInspector: View {
     private var zoomDurationBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.duration; case let .zoomIn(v): v.duration; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.duration = max(0, value); event.action = .zoomOut(v); case var .zoomIn(v): v.duration = max(0, value); event.action = .zoomIn(v); default: break } } }) }
 
     private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
-    private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])) } }
+    private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
 }

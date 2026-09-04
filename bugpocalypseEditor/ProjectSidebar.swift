@@ -47,6 +47,46 @@ struct ProjectSidebar: View {
                             .tag(EditorSelection.mission(document.fileURL))
                         }
                     }
+                    if section == .formations {
+                        ForEach(filteredFormations) { document in
+                            HStack(spacing: 7) {
+                                Image(systemName: formationSymbol(document.definition.formation.kind))
+                                    .foregroundStyle(.secondary)
+                                Text(document.definition.name).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text("\(document.definition.formation.offsets().count)")
+                                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                if document.definition.authoringStatus == .draft {
+                                    Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange)
+                                }
+                                if document.isDirty {
+                                    Circle().fill(.orange).frame(width: 7, height: 7)
+                                }
+                            }
+                            .padding(.leading, 16)
+                            .tag(EditorSelection.formation(document.fileURL))
+                        }
+                    }
+                    if section == .paths {
+                        ForEach(filteredPaths) { document in
+                            HStack(spacing: 7) {
+                                Image(systemName: pathSymbol(document.definition.path.kind))
+                                    .foregroundStyle(.secondary)
+                                Text(document.definition.name).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text(document.definition.path.kind.rawValue.capitalized)
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                if document.definition.authoringStatus == .draft {
+                                    Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange)
+                                }
+                                if document.isDirty {
+                                    Circle().fill(.orange).frame(width: 7, height: 7)
+                                }
+                            }
+                            .padding(.leading, 16)
+                            .tag(EditorSelection.path(document.fileURL))
+                        }
+                    }
                 }
             }
         }
@@ -58,6 +98,24 @@ struct ProjectSidebar: View {
                     Label("Open Project", systemImage: "folder")
                 }
                 .help("Open a Bugpocalypse checkout")
+            }
+            if isFormationContext {
+                ToolbarItem {
+                    Button(action: workspace.createFormation) {
+                        Label("New Formation", systemImage: "plus")
+                    }
+                    .help("Create a reusable formation")
+                    .disabled(workspace.projectRoot == nil)
+                }
+            }
+            if isPathContext {
+                ToolbarItem {
+                    Button(action: workspace.createPath) {
+                        Label("New Path", systemImage: "plus")
+                    }
+                    .help("Create a reusable path")
+                    .disabled(workspace.projectRoot == nil)
+                }
             }
         }
     }
@@ -75,6 +133,57 @@ struct ProjectSidebar: View {
         return workspace.missions.filter {
             $0.definition.metadata.displayName.localizedCaseInsensitiveContains(workspace.searchText) ||
             $0.definition.id.localizedCaseInsensitiveContains(workspace.searchText)
+        }
+    }
+
+    private var filteredFormations: [FormationEditorDocument] {
+        guard !workspace.searchText.isEmpty else { return workspace.formations }
+        return workspace.formations.filter {
+            $0.definition.name.localizedCaseInsensitiveContains(workspace.searchText) ||
+            $0.definition.id.localizedCaseInsensitiveContains(workspace.searchText) ||
+            $0.definition.formation.kind.rawValue.localizedCaseInsensitiveContains(workspace.searchText)
+        }
+    }
+
+    private var filteredPaths: [PathEditorDocument] {
+        guard !workspace.searchText.isEmpty else { return workspace.paths }
+        return workspace.paths.filter {
+            $0.definition.name.localizedCaseInsensitiveContains(workspace.searchText) ||
+            $0.definition.id.localizedCaseInsensitiveContains(workspace.searchText) ||
+            $0.definition.path.kind.rawValue.localizedCaseInsensitiveContains(workspace.searchText)
+        }
+    }
+
+    private var isFormationContext: Bool {
+        switch workspace.selection {
+        case .formation, .section(.formations): true
+        default: false
+        }
+    }
+
+    private var isPathContext: Bool {
+        switch workspace.selection {
+        case .path, .section(.paths): true
+        default: false
+        }
+    }
+
+    private func pathSymbol(_ kind: MovementPathKind) -> String {
+        switch kind {
+        case .straight: "arrow.left"
+        case .sine: "waveform.path"
+        case .waypoints: "point.topleft.down.to.point.bottomright.curvepath"
+        case .bezier: "skew"
+        }
+    }
+
+    private func formationSymbol(_ kind: FormationKind) -> String {
+        switch kind {
+        case .line, .slottedLine: "ellipsis"
+        case .v: "chevron.right"
+        case .staggeredGrid: "square.grid.3x3"
+        case .arc: "rainbow"
+        case .freeform: "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -111,14 +220,14 @@ struct EditorStatusBar: View {
 
 
     private var selectedFilePath: String? {
-        (workspace.selectedMission?.fileURL ?? workspace.selectedWorld?.fileURL)?.path(percentEncoded: false)
+        (workspace.selectedPath?.fileURL ?? workspace.selectedFormation?.fileURL ?? workspace.selectedMission?.fileURL ?? workspace.selectedWorld?.fileURL)?.path(percentEncoded: false)
     }
 
     private var selectedStatus: AuthoringStatus? {
-        workspace.selectedMission?.definition.authoringStatus ?? workspace.selectedWorld?.definition.authoringStatus
+        workspace.selectedPath?.definition.authoringStatus ?? workspace.selectedFormation?.definition.authoringStatus ?? workspace.selectedMission?.definition.authoringStatus ?? workspace.selectedWorld?.definition.authoringStatus
     }
 
     private var isDirty: Bool {
-        workspace.selectedMission?.isDirty ?? workspace.selectedWorld?.isDirty ?? false
+        workspace.selectedPath?.isDirty ?? workspace.selectedFormation?.isDirty ?? workspace.selectedMission?.isDirty ?? workspace.selectedWorld?.isDirty ?? false
     }
 }

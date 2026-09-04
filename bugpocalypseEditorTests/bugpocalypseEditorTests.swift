@@ -12,6 +12,33 @@ import Testing
 
 struct bugpocalypseEditorTests {
     @MainActor
+    @Test func reopensTheMostRecentlyOpenedProject() throws {
+        let root = try makeCheckout(includeMission: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let defaults = UserDefaults.standard
+        let pathKey = "BugpocalypseEditor.projectRoot"
+        let bookmarkKey = "BugpocalypseEditor.projectRootBookmark"
+        let previousPath = defaults.object(forKey: pathKey)
+        let previousBookmark = defaults.object(forKey: bookmarkKey)
+        defer {
+            if let previousPath { defaults.set(previousPath, forKey: pathKey) }
+            else { defaults.removeObject(forKey: pathKey) }
+            if let previousBookmark { defaults.set(previousBookmark, forKey: bookmarkKey) }
+            else { defaults.removeObject(forKey: bookmarkKey) }
+        }
+
+        let opener = EditorWorkspace()
+        opener.openProject(at: root)
+
+        let restoredWorkspace = EditorWorkspace()
+        restoredWorkspace.openRememberedProjectIfNeeded()
+
+        #expect(restoredWorkspace.projectRoot == root.standardizedFileURL)
+        #expect(restoredWorkspace.worlds.count == 1)
+    }
+
+    @MainActor
     @Test func loadsAndEditsAWorldCheckout() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -163,6 +190,105 @@ struct bugpocalypseEditorTests {
             from: Data(contentsOf: root.appendingPathComponent("godot/assets/missions/test/1.json"))
         )
         #expect(saved.timeline.count == 2)
+    }
+
+    @MainActor
+    @Test func createsEditsAndSavesReusableFormation() throws {
+        let root = try makeCheckout(includeMission: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = EditorWorkspace()
+        workspace.openProject(at: root)
+        workspace.createFormation()
+
+        #expect(workspace.formations.count == 1)
+        #expect(workspace.selectedFormation?.definition.schemaVersion == 2)
+        #expect(workspace.selectedFormation?.definition.formation.offsets().count == 3)
+
+        workspace.updateSelectedFormation { document in
+            document.name = "Alpha V"
+            document.formation = .freeform(.init(members: [
+                .init(id: "leader", offset: .init(x: 0, y: 0)),
+                .init(id: "wing", offset: .init(x: 40, y: 20))
+            ]))
+        }
+        #expect(workspace.selectedFormation?.isDirty == true)
+        #expect(workspace.diagnostics.isEmpty)
+
+        workspace.saveSelectedFormation()
+        #expect(workspace.selectedFormation?.isDirty == false)
+        let saved = try ContentJSON.decode(
+            FormationDocument.self,
+            from: Data(contentsOf: root.appendingPathComponent("godot/assets/formations/formation_1.json"))
+        )
+        #expect(saved.formation.offsets() == [.init(x: 0, y: 0), .init(x: 40, y: 20)])
+        #expect(saved.name == "Alpha V")
+    }
+
+    @MainActor
+    @Test func invalidFormationCannotBeSaved() throws {
+        let root = try makeCheckout(includeMission: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = EditorWorkspace()
+        workspace.openProject(at: root)
+        workspace.createFormation()
+        workspace.updateSelectedFormation {
+            $0.formation = .slottedLine(.init(axis: .vertical, slotCount: 3, spacing: 40, occupiedSlots: [2, 2, 4]))
+        }
+
+        #expect(workspace.diagnostics.count == 2)
+        workspace.saveSelectedFormation()
+        #expect(workspace.selectedFormation?.isDirty == true)
+        #expect(workspace.errorMessage?.contains("2 structural errors") == true)
+    }
+
+    @MainActor
+    @Test func createsEditsAndSavesReusablePath() throws {
+        let root = try makeCheckout(includeMission: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = EditorWorkspace()
+        workspace.openProject(at: root)
+        workspace.createPath()
+
+        #expect(workspace.paths.count == 1)
+        #expect(workspace.selectedPath?.definition.schemaVersion == 2)
+        #expect(workspace.selectedPath?.definition.path.points?.count == 3)
+
+        workspace.updateSelectedPath { document in
+            document.name = "High Weave"
+            document.path = .sine(.init(speed: 140, amplitude: 52, frequency: 0.75, phaseOffset: 0.2))
+        }
+        #expect(workspace.selectedPath?.isDirty == true)
+        #expect(workspace.diagnostics.isEmpty)
+
+        workspace.saveSelectedPath()
+        #expect(workspace.selectedPath?.isDirty == false)
+        let saved = try ContentJSON.decode(
+            PathDocument.self,
+            from: Data(contentsOf: root.appendingPathComponent("godot/assets/paths/path_1.json"))
+        )
+        #expect(saved.path == .sine(.init(speed: 140, amplitude: 52, frequency: 0.75, phaseOffset: 0.2)))
+        #expect(saved.name == "High Weave")
+    }
+
+    @MainActor
+    @Test func invalidWaypointPathCannotBeSaved() throws {
+        let root = try makeCheckout(includeMission: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = EditorWorkspace()
+        workspace.openProject(at: root)
+        workspace.createPath()
+        workspace.updateSelectedPath {
+            $0.path = .waypoints(.init(duration: 0, points: [.init(x: 1, y: 0.5)]))
+        }
+
+        #expect(workspace.diagnostics.count == 2)
+        workspace.saveSelectedPath()
+        #expect(workspace.selectedPath?.isDirty == true)
+        #expect(workspace.errorMessage?.contains("2 structural errors") == true)
     }
 
     private func makeCheckout(includeMission: Bool) throws -> URL {
