@@ -39,6 +39,7 @@ private struct WorldCanvas: View {
 
     private let tileWidth: CGFloat = 96
     private let diamondHeight: CGFloat = 52
+    @State private var zoom: CGFloat = 1
 
     var body: some View {
         let layout = CanvasLayout(cells: world.cells, tileWidth: tileWidth, diamondHeight: diamondHeight)
@@ -47,8 +48,8 @@ private struct WorldCanvas: View {
                 Canvas { context, _ in
                     for cell in world.cells {
                         guard let from = layout.points[cell.id] else { continue }
-                        for neighbourID in cell.neighbourIDs where cell.id < neighbourID {
-                            guard let to = layout.points[neighbourID] else { continue }
+                        for neighbour in world.edgeSharingCells(of: cell) where cell.id < neighbour.id {
+                            guard let to = layout.points[neighbour.id] else { continue }
                             var path = Path()
                             path.move(to: from)
                             path.addLine(to: to)
@@ -57,6 +58,8 @@ private struct WorldCanvas: View {
                     }
                 }
                 .frame(width: layout.size.width, height: layout.size.height)
+                .allowsHitTesting(false)
+                .zIndex(-10_000)
 
                 ForEach(world.cells, id: \.id) { cell in
                     WorldCellTile(
@@ -66,17 +69,28 @@ private struct WorldCanvas: View {
                         tileWidth: tileWidth,
                         diamondHeight: diamondHeight
                     )
-                    .position(layout.points[cell.id] ?? .zero)
+                    .contentShape(WorldCellHitArea(diamondHeight: diamondHeight))
                     .onTapGesture { selectedCellID = cell.id }
-                    .gesture(DragGesture(minimumDistance: 8).onEnded { value in
-                        let dy = Int((-2 * value.translation.height / diamondHeight).rounded())
-                        let dx = Int(((value.translation.width + (tileWidth * 0.5 * CGFloat(dy))) / tileWidth).rounded())
+                    .simultaneousGesture(DragGesture(minimumDistance: 8).onEnded { value in
+                        let translation = CGSize(
+                            width: value.translation.width / zoom,
+                            height: value.translation.height / zoom
+                        )
+                        let dy = Int((-2 * translation.height / diamondHeight).rounded())
+                        let dx = Int(((translation.width + (tileWidth * 0.5 * CGFloat(dy))) / tileWidth).rounded())
                         guard dx != 0 || dy != 0 else { return }
                         moveCell(cell.id, WorldGridCoordinate(x: cell.coordinate.x + dx, y: cell.coordinate.y + dy))
                     })
+                    .position(layout.points[cell.id] ?? .zero)
+                    // WorldScene renders cells by their anchor's screen Y.
+                    // A smaller grid Y is visually closer, so it must also win
+                    // hit testing where two isometric diamonds overlap.
+                    .zIndex(-Double(cell.coordinate.y))
                 }
             }
             .frame(width: layout.size.width, height: layout.size.height)
+            .scaleEffect(zoom, anchor: .topLeading)
+            .frame(width: layout.size.width * zoom, height: layout.size.height * zoom, alignment: .topLeading)
             .padding(40)
         }
         .background {
@@ -87,6 +101,34 @@ private struct WorldCanvas: View {
                         .foregroundStyle(.quaternary)
                 }
         }
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 2) {
+                Button { changeZoom(by: -0.15) } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                }
+                .help("Zoom out")
+                Text("\(Int((zoom * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .frame(minWidth: 42)
+                Button { changeZoom(by: 0.15) } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                }
+                .help("Zoom in")
+                Button { zoom = 1 } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .help("Reset zoom")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .padding(12)
+        }
+    }
+
+    private func changeZoom(by amount: CGFloat) {
+        zoom = min(max(zoom + amount, 0.5), 2)
     }
 }
 
@@ -121,39 +163,30 @@ private struct WorldCellTile: View {
     let diamondHeight: CGFloat
 
     var body: some View {
-        VStack(spacing: 2) {
-            ZStack {
-                Diamond()
-                    .fill(kindColor.opacity(0.28))
-                    .overlay(Diamond().stroke(isSelected ? Color.accentColor : .white.opacity(0.4), lineWidth: isSelected ? 4 : 1))
-                    .frame(width: tileWidth, height: diamondHeight)
+        ZStack {
+            Diamond()
+                .fill(kindColor.opacity(0.28))
+                .overlay(Diamond().stroke(isSelected ? Color.accentColor : .white.opacity(0.4), lineWidth: isSelected ? 4 : 1))
+                .frame(width: tileWidth, height: diamondHeight)
 
-                if let imageURL, let image = NSImage(contentsOf: imageURL) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFit()
-                        .frame(width: tileWidth, height: tileWidth)
-                        .offset(y: -tileWidth * 0.25)
-                        .allowsHitTesting(false)
-                }
-
-                Image(systemName: kindSymbol)
-                    .font(.body.bold())
-                    .padding(7)
-                    .background(.black.opacity(0.65), in: Circle())
-                    .foregroundStyle(.white)
+            if let imageURL, let image = NSImage(contentsOf: imageURL) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: tileWidth, height: tileWidth)
+                    .offset(y: -tileWidth * 0.25)
+                    .allowsHitTesting(false)
             }
-            Text(cell.displayName)
-                .font(.caption.bold())
-                .lineLimit(1)
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(.regularMaterial, in: Capsule())
-            Text("\(cell.coordinate.x), \(cell.coordinate.y)")
-                .font(.caption2.monospaced()).foregroundStyle(.secondary)
+
+            Image(systemName: kindSymbol)
+                .font(.body.bold())
+                .padding(7)
+                .background(.black.opacity(0.65), in: Circle())
+                .foregroundStyle(.white)
+                .allowsHitTesting(false)
         }
-        .frame(width: tileWidth + 36, height: tileWidth + 45)
-        .contentShape(Rectangle())
+        .frame(width: tileWidth, height: tileWidth)
         .shadow(color: isSelected ? .accentColor.opacity(0.35) : .clear, radius: 8)
     }
 
@@ -188,6 +221,25 @@ private struct Diamond: Shape {
         path.move(to: CGPoint(x: rect.midX, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
         path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The cell view is square to make room for tall artwork, but only its ground
+/// diamond should select it. Using the full square causes neighbouring cells'
+/// invisible hit regions to overlap on the isometric grid.
+private struct WorldCellHitArea: Shape {
+    let diamondHeight: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let top = rect.midY - diamondHeight * 0.5
+        let bottom = rect.midY + diamondHeight * 0.5
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: top))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: bottom))
         path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
         path.closeSubpath()
         return path
@@ -245,12 +297,21 @@ struct WorldInspector: View {
                 Picker("Kind", selection: cellBinding(\.kind)) {
                     ForEach(WorldCellKind.allCases, id: \.self) { Text(kindTitle($0)).tag($0) }
                 }
-                TextField("Tile", text: cellBinding(\.tileName))
+                Picker("Tile", selection: cellBinding(\.tileName)) {
+                    if !workspace.availableWorldTiles.contains(cell.tileName) {
+                        Text("Missing: \(cell.tileName)").tag(cell.tileName)
+                    }
+                    ForEach(workspace.availableWorldTiles, id: \.self) { tileName in
+                        Label(tileName.replacingOccurrences(of: "world/", with: ""), systemImage: "photo")
+                            .tag(tileName)
+                    }
+                }
             }
             Section("Grid") {
                 Stepper("X: \(cell.coordinate.x)", value: coordinateBinding(\.x), in: -100...100)
                 Stepper("Y: \(cell.coordinate.y)", value: coordinateBinding(\.y), in: -100...100)
-                Text("\(cell.neighbourIDs.count) automatic connection\(cell.neighbourIDs.count == 1 ? "" : "s")")
+                let connectionCount = workspace.selectedWorld?.definition.edgeSharingCells(of: cell).count ?? 0
+                Text("\(connectionCount) automatic connection\(connectionCount == 1 ? "" : "s")")
                     .foregroundStyle(.secondary)
             }
             Section("Discovery") {

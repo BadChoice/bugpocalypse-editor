@@ -191,7 +191,6 @@ final class EditorWorkspace: ObservableObject {
         updateSelectedWorld { world in
             guard let index = world.cells.firstIndex(where: { $0.id == id }) else { return }
             world.cells[index].coordinate = coordinate
-            Self.rebuildOrdinaryConnections(in: &world)
         }
     }
 
@@ -209,7 +208,6 @@ final class EditorWorkspace: ObservableObject {
         )
         updateSelectedWorld { world in
             world.cells.append(cell)
-            Self.rebuildOrdinaryConnections(in: &world)
         }
         selectedCellID = cell.id
     }
@@ -218,7 +216,9 @@ final class EditorWorkspace: ObservableObject {
         guard let selectedCellID else { return }
         updateSelectedWorld { world in
             world.cells.removeAll { $0.id == selectedCellID }
-            Self.rebuildOrdinaryConnections(in: &world)
+            for index in world.cells.indices {
+                world.cells[index].neighbourIDs.removeAll { $0 == selectedCellID }
+            }
         }
         self.selectedCellID = nil
     }
@@ -243,15 +243,27 @@ final class EditorWorkspace: ObservableObject {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// Tile resources the world editor can author. Paths stay relative to the
+    /// game's `assets` folder so they match the runtime atlas naming scheme.
+    var availableWorldTiles: [String] {
+        guard let projectRoot else { return [] }
+        let directory = projectRoot.appendingPathComponent("assets/world", isDirectory: true)
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        let supportedExtensions = Set(["png", "jpg", "jpeg", "webp"])
+        return files
+            .filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
+            .map { "world/\($0.lastPathComponent)" }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     private func isValidProjectRoot(_ url: URL) -> Bool {
         ["godot/project.godot", "godot/assets", "BugpocalypseSwift/Package.swift"]
             .allSatisfy { fileManager.fileExists(atPath: url.appendingPathComponent($0).path) }
     }
 
-    private static func rebuildOrdinaryConnections(in world: inout WorldDefinition) {
-        let cellsByCoordinate = Dictionary(uniqueKeysWithValues: world.cells.map { ($0.coordinate, $0.id) })
-        for index in world.cells.indices {
-            world.cells[index].neighbourIDs = world.cells[index].coordinate.neighbours.compactMap { cellsByCoordinate[$0] }
-        }
-    }
 }
