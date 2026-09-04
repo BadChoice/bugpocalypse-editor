@@ -192,9 +192,9 @@ private struct WorldCellTile: View {
 
     private var kindColor: Color {
         switch cell.kind {
-        case .mission: .blue
+        case .mission: .yellow
         case .eliteMission: .purple
-        case .boss: .red
+        case .boss: .yellow
         case .supplyCache: .orange
         case .survivor: .green
         case .exploration: .teal
