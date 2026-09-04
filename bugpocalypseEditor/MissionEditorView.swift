@@ -21,7 +21,8 @@ struct MissionEditorView: View {
                     workspace: workspace,
                     playhead: playhead,
                     selectedEventIndex: workspace.selectedMissionEventIndex,
-                    enemyAssetURL: workspace.enemyAssetURL
+                    enemyAssetURL: workspace.enemyAssetURL,
+                    selectEvent: selectTimelineEvent
                 )
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .frame(maxHeight: 430)
@@ -94,23 +95,29 @@ struct MissionEditorView: View {
                 Text("Select an event to edit it in the inspector")
                     .font(.caption).foregroundStyle(.tertiary)
             }
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(sortedEvents, id: \.offset) { item in
-                        Button {
-                            workspace.selectedMissionEventIndex = item.offset
-                            playhead = item.element.at
-                            isPlaying = false
-                        } label: {
-                            TimelineEventCard(
-                                event: item.element,
-                                isSelected: workspace.selectedMissionEventIndex == item.offset
-                            )
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(sortedEvents, id: \.offset) { item in
+                            Button {
+                                selectTimelineEvent(item.offset, item.element.at)
+                                withAnimation { proxy.scrollTo(item.offset, anchor: .center) }
+                            } label: {
+                                TimelineEventCard(
+                                    event: item.element,
+                                    isSelected: workspace.selectedMissionEventIndex == item.offset
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .id(item.offset)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
+                .onChange(of: workspace.selectedMissionEventIndex) { _, index in
+                    guard let index else { return }
+                    withAnimation { proxy.scrollTo(index, anchor: .center) }
+                }
             }
         }
         .frame(minHeight: 100)
@@ -127,6 +134,12 @@ struct MissionEditorView: View {
     }
 
     private func timeText(_ value: Double) -> String { String(format: "%05.2f", value) }
+
+    private func selectTimelineEvent(_ index: Int, _ at: Double) {
+        workspace.selectedMissionEventIndex = index
+        playhead = at
+        isPlaying = false
+    }
 
     private static let defaultSpawn = SpawnFormationEvent(
         enemy: .init(id: "fly_basic", level: 1),
@@ -195,6 +208,7 @@ private struct MissionPreview: View {
     let playhead: Double
     let selectedEventIndex: Int?
     let enemyAssetURL: (String) -> URL?
+    let selectEvent: (Int, Double) -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -205,7 +219,7 @@ private struct MissionPreview: View {
                 previewGrid(origin: origin, scale: scale)
                 ForEach(Array(mission.timeline.enumerated()), id: \.offset) { index, event in
                     if case let .spawnFormation(spawn) = event.action, event.at <= playhead {
-                        formation(spawn, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
+                        formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
                     }
                 }
                 Text("640 × 360  •  t = \(playhead, specifier: "%.2f") s")
@@ -232,7 +246,7 @@ private struct MissionPreview: View {
     }
 
     @ViewBuilder
-    private func formation(_ spawn: SpawnFormationEvent, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
+    private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
         let anchorX = spawn.spawnPosition.edge == .right ? 640 + spawn.spawnPosition.xOffset : -spawn.spawnPosition.xOffset
         let path = sampledPath(workspace.path(for: spawn.pathReference) ?? spawn.path, elapsed: elapsed)
         let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
@@ -244,9 +258,21 @@ private struct MissionPreview: View {
             EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected)
                 .frame(width: 42 * scale, height: 42 * scale)
                 .position(position)
+                .overlay(alignment: .top) {
+                    Text("Lv \(spawn.enemy.level)")
+                        .font(.system(size: max(7, 9 * scale), weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, max(3, 4 * scale))
+                        .padding(.vertical, max(1, 2 * scale))
+                        .background(.black.opacity(0.78), in: Capsule())
+                        .offset(y: -max(14, 24 * scale))
+                        .allowsHitTesting(false)
+                }
                 .overlay(alignment: .bottom) {
                     if selected { Text("\(index)").font(.system(size: 8)).foregroundStyle(.white).offset(y: 12 * scale) }
                 }
+                .contentShape(Circle())
+                .onTapGesture { selectEvent(eventIndex, eventTime) }
         }
     }
 
