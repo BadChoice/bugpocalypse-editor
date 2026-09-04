@@ -5,6 +5,7 @@ import SwiftUI
 struct WorldEditorView: View {
     @ObservedObject var workspace: EditorWorkspace
     @ObservedObject var document: WorldDocument
+    @State private var showNodeIcons = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,6 +16,8 @@ struct WorldEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Toggle("Icons", isOn: $showNodeIcons)
+                    .toggleStyle(.button)
                 Button(action: workspace.addCell) { Label("Add Cell", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
             }
@@ -25,6 +28,7 @@ struct WorldEditorView: View {
                 selectedCellID: $workspace.selectedCellID,
                 assetURL: workspace.assetURL,
                 missionNumber: { workspace.mission(for: $0)?.metadata.missionNumber },
+                showNodeIcons: showNodeIcons,
                 moveCell: workspace.moveCell
             )
         }
@@ -37,6 +41,7 @@ private struct WorldCanvas: View {
     @Binding var selectedCellID: String?
     let assetURL: (String) -> URL?
     let missionNumber: (String?) -> Int?
+    let showNodeIcons: Bool
     let moveCell: (String, WorldGridCoordinate) -> Void
 
     private let tileWidth: CGFloat = 96
@@ -69,6 +74,7 @@ private struct WorldCanvas: View {
                         isSelected: selectedCellID == cell.id,
                         imageURL: assetURL(cell.tileName),
                         missionNumber: missionNumber(cell.missionResourcePath),
+                        showNodeIcons: showNodeIcons,
                         tileWidth: tileWidth,
                         diamondHeight: diamondHeight
                     )
@@ -163,6 +169,7 @@ private struct WorldCellTile: View {
     let isSelected: Bool
     let imageURL: URL?
     let missionNumber: Int?
+    let showNodeIcons: Bool
     let tileWidth: CGFloat
     let diamondHeight: CGFloat
 
@@ -183,21 +190,23 @@ private struct WorldCellTile: View {
                     .allowsHitTesting(false)
             }
 
-            Image(systemName: kindSymbol)
-                .font(.body.bold())
-                .padding(7)
-                .background(kindSymbolColor, in: Circle())
-                .foregroundStyle(.white)
-                .allowsHitTesting(false)
-
-            if let missionNumber {
-                Text("M\(missionNumber)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(.white.opacity(0.9), in: Capsule())
-                    .offset(x: tileWidth * 0.30, y: -tileWidth * 0.30)
+            if showNodeIcons {
+                Image(systemName: kindSymbol)
+                    .font(.body.bold())
+                    .padding(7)
+                    .background(kindSymbolColor, in: Circle())
+                    .foregroundStyle(.white)
                     .allowsHitTesting(false)
+
+                if let missionNumber {
+                    Text("M\(missionNumber)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(.white.opacity(0.9), in: Capsule())
+                        .offset(x: tileWidth * 0.30, y: -tileWidth * 0.30)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(width: tileWidth, height: tileWidth)
