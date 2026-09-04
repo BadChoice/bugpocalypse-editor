@@ -274,3 +274,14 @@ final class EditorWorkspace: ObservableObject {
     }
 
 }
+
+extension WorldGridCoordinate {
+    var neighbours: [WorldGridCoordinate] {
+        [
+            WorldGridCoordinate(x: x + 1, y: y),
+            WorldGridCoordinate(x: x - 1, y: y),
+            WorldGridCoordinate(x: x, y: y + 1),
+            WorldGridCoordinate(x: x, y: y - 1)
+        ]
+    }
+}

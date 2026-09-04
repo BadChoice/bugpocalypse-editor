@@ -41,6 +41,17 @@ struct bugpocalypseEditorTests {
         #expect(workspace.selectedWorld?.isDirty == true)
     }
 
+    @Test func worldGridCoordinateNeighbours() throws {
+        let coord = WorldGridCoordinate(x: 2, y: 3)
+        let expected = [
+            WorldGridCoordinate(x: 3, y: 3),
+            WorldGridCoordinate(x: 1, y: 3),
+            WorldGridCoordinate(x: 2, y: 4),
+            WorldGridCoordinate(x: 2, y: 2)
+        ]
+        #expect(coord.neighbours == expected)
+    }
+
     @MainActor
     @Test func addCellNextToSelectedCell() throws {
         let root = FileManager.default.temporaryDirectory
