@@ -6,27 +6,24 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct bugpocalypseEditorApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
+        .commands {
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") {
+                    NotificationCenter.default.post(name: .saveWorld, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: .command)
+            }
+        }
     }
+}
+
+extension Notification.Name {
+    static let saveWorld = Notification.Name("BugpocalypseEditor.saveWorld")
 }

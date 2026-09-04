@@ -1,59 +1,98 @@
-//
-//  ContentView.swift
-//  bugpocalypseEditor
-//
-//  Created by Jordi Puigdellívol on 04/09/2026.
-//
-
+import BugpocalypseContent
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @StateObject private var workspace = EditorWorkspace()
 
     var body: some View {
         NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
+            ProjectSidebar(workspace: workspace)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
+        } content: {
+            editorContent
+                .navigationSplitViewColumnWidth(min: 520, ideal: 760)
         } detail: {
-            Text("Select an item")
+            WorldInspector(workspace: workspace)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+        }
+        .frame(minWidth: 1040, minHeight: 680)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            EditorStatusBar(workspace: workspace)
+        }
+        .alert("Couldn’t complete that action", isPresented: errorIsPresented) {
+            Button("OK") { workspace.errorMessage = nil }
+        } message: {
+            Text(workspace.errorMessage ?? "Unknown error")
+        }
+        .task { workspace.openRememberedProjectIfNeeded() }
+        .onReceive(NotificationCenter.default.publisher(for: .saveWorld)) { _ in
+            workspace.saveSelectedWorld()
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+    @ViewBuilder
+    private var editorContent: some View {
+        switch workspace.selection {
+        case .world(let url):
+            if let document = workspace.worldDocument(at: url) {
+                WorldEditorView(workspace: workspace, document: document)
+                    .id(url)
+            } else {
+                ContentUnavailableView("World not found", systemImage: "globe")
             }
+        case .section(.worlds):
+            WorldWelcomeView(workspace: workspace)
+        case .section(let section):
+            ContentUnavailableView(
+                "\(section.title) editor coming next",
+                systemImage: section.systemImage,
+                description: Text("This first pass focuses on world authoring.")
+            )
+        case nil:
+            ContentUnavailableView(
+                "Open a Bugpocalypse project",
+                systemImage: "folder.badge.plus",
+                description: Text("Choose the game checkout that contains Godot and BugpocalypseSwift.")
+            )
+        }
+    }
+
+    private var errorIsPresented: Binding<Bool> {
+        Binding(
+            get: { workspace.errorMessage != nil },
+            set: { if !$0 { workspace.errorMessage = nil } }
+        )
+    }
+}
+
+private struct WorldWelcomeView: View {
+    @ObservedObject var workspace: EditorWorkspace
+
+    var body: some View {
+        if workspace.worlds.isEmpty {
+            ContentUnavailableView(
+                "No worlds found",
+                systemImage: "globe.badge.chevron.backward",
+                description: Text("World JSON files will appear here from godot/assets/worlds.")
+            )
+        } else {
+            VStack(spacing: 16) {
+                Image(systemName: "globe.americas.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.teal)
+                Text("Worlds").font(.largeTitle.bold())
+                Text("Select a world in the sidebar to edit its map and cells.")
+                    .foregroundStyle(.secondary)
+                Button("Open \(workspace.worlds[0].definition.displayName)") {
+                    workspace.selectWorld(workspace.worlds[0])
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
