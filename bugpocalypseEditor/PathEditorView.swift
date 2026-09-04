@@ -59,8 +59,8 @@ struct PathEditorView: View {
         switch document.definition.path {
         case let .straight(value): "Straight · \(value.speed.formatted()) px/s"
         case let .sine(value): "Sine · \(value.speed.formatted()) px/s · \(value.amplitude.formatted()) px amplitude"
-        case let .waypoints(value): "Waypoints · \(value.points.count) points · \(value.duration.formatted()) s"
-        case let .bezier(value): "Bézier · \(value.duration.formatted()) s"
+        case let .waypoints(value): "Waypoints · \(value.points.count) points · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
+        case let .bezier(value): "Bézier · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
         }
     }
 
@@ -299,16 +299,10 @@ private struct PathCanvas: View {
         switch pathDefinition {
         case let .waypoints(value):
             guard value.points.count >= 2, value.duration > 0 else { return value.points.first ?? .init(x: 0, y: 0) }
-            let progress = min(max(elapsed / value.duration, 0), 1)
-            let segmentCount = value.points.count - 1
-            let route = progress * Double(segmentCount)
-            let index = min(Int(route), segmentCount - 1)
-            let amount = route - Double(index)
-            let start = value.points[index], end = value.points[index + 1]
-            return .init(x: start.x + (end.x - start.x) * amount, y: start.y + (end.y - start.y) * amount)
+            return value.point(at: elapsed)
         case let .bezier(value):
             guard value.duration > 0 else { return value.start }
-            return value.point(at: elapsed / value.duration)
+            return value.point(at: value.effectiveElapsed(at: elapsed) / value.duration)
         case .straight, .sine:
             let offset = pathDefinition.offset(elapsed: elapsed)
             return .init(x: 0.95 + offset.x / 640, y: 0.5 + offset.y / 360)
@@ -373,11 +367,25 @@ struct PathInspector: View {
                 number("Member phase (rad)", sineBinding(\.phaseOffset, fallback: value.phaseOffset))
             case let .waypoints(value):
                 number("Duration (s)", waypointBinding(\.duration, fallback: value.duration))
+                Toggle("Loop after completion", isOn: waypointLoopBinding)
+                if value.loopToPoint != nil {
+                    Picker("Loop to waypoint", selection: waypointLoopToBinding) {
+                        ForEach(value.points.indices, id: \.self) { Text("Point \($0 + 1)").tag($0) }
+                    }
+                    Text("After the final point, the route travels back to this waypoint before repeating.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 LabeledContent("Segments", value: "\(max(0, value.points.count - 1))")
                 Text("Segments currently share the duration equally.")
                     .font(.caption).foregroundStyle(.secondary)
             case let .bezier(value):
                 number("Duration (s)", bezierBinding(\.duration, fallback: value.duration))
+                Toggle("Loop after completion", isOn: bezierLoopBinding)
+                if value.loopStart != nil {
+                    number("Repeat from (s)", bezierLoopStartBinding(fallback: value.loopStart ?? 0))
+                    Text("For a seamless loop, the curve endpoint should meet the curve at this time.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text("Drag start, end, and the two control handles on the canvas.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -478,6 +486,66 @@ struct PathInspector: View {
     private func sineBinding<Value>(_ kp: WritableKeyPath<SinePath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .sine(v) = $0 { v } else { nil } }, MovementPathDefinition.sine, kp, fallback: fallback) }
     private func waypointBinding<Value>(_ kp: WritableKeyPath<WaypointPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .waypoints(v) = $0 { v } else { nil } }, MovementPathDefinition.waypoints, kp, fallback: fallback) }
     private func bezierBinding<Value>(_ kp: WritableKeyPath<BezierPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .bezier(v) = $0 { v } else { nil } }, MovementPathDefinition.bezier, kp, fallback: fallback) }
+
+    private var waypointLoopBinding: Binding<Bool> {
+        Binding(get: {
+            if case let .waypoints(value)? = workspace.selectedPath?.definition.path { value.loopToPoint != nil } else { false }
+        }, set: { enabled in
+            workspace.updateSelectedPath { document in
+                guard case var .waypoints(value) = document.path else { return }
+                value.loopToPoint = enabled ? (value.loopToPoint ?? 0) : nil
+                document.path = .waypoints(value)
+            }
+        })
+    }
+
+    private var waypointLoopToBinding: Binding<Int> {
+        Binding(get: {
+            if case let .waypoints(value)? = workspace.selectedPath?.definition.path { value.loopToPoint ?? 0 } else { 0 }
+        }, set: { index in
+            workspace.updateSelectedPath { document in
+                guard case var .waypoints(value) = document.path else { return }
+                value.loopToPoint = index
+                document.path = .waypoints(value)
+            }
+        })
+    }
+
+    private var bezierLoopBinding: Binding<Bool> {
+        Binding(get: {
+            if case let .bezier(value)? = workspace.selectedPath?.definition.path { value.loopStart != nil } else { false }
+        }, set: { enabled in
+            workspace.updateSelectedPath { document in
+                guard case var .bezier(value) = document.path else { return }
+                value.loopStart = enabled ? (value.loopStart ?? 0) : nil
+                document.path = .bezier(value)
+            }
+        })
+    }
+
+    private func waypointLoopStartBinding(fallback: Double) -> Binding<Double> {
+        Binding(get: {
+            if case let .waypoints(value)? = workspace.selectedPath?.definition.path { value.loopStart ?? fallback } else { fallback }
+        }, set: { newValue in
+            workspace.updateSelectedPath { document in
+                guard case var .waypoints(value) = document.path else { return }
+                value.loopStart = newValue
+                document.path = .waypoints(value)
+            }
+        })
+    }
+
+    private func bezierLoopStartBinding(fallback: Double) -> Binding<Double> {
+        Binding(get: {
+            if case let .bezier(value)? = workspace.selectedPath?.definition.path { value.loopStart ?? fallback } else { fallback }
+        }, set: { newValue in
+            workspace.updateSelectedPath { document in
+                guard case var .bezier(value) = document.path else { return }
+                value.loopStart = newValue
+                document.path = .bezier(value)
+            }
+        })
+    }
 
     private func pointExpanded(_ index: Int) -> Binding<Bool> {
         Binding(

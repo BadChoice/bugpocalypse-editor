@@ -316,6 +316,29 @@ final class EditorWorkspace: ObservableObject {
         paths.first { $0.fileURL == url }
     }
 
+    func resourcePath(for fileURL: URL) -> String? {
+        guard let projectRoot else { return nil }
+        let godotRoot = projectRoot.appendingPathComponent("godot", isDirectory: true).standardizedFileURL.path
+        let filePath = fileURL.standardizedFileURL.path
+        guard filePath.hasPrefix(godotRoot + "/") else { return nil }
+        return "res://" + String(filePath.dropFirst(godotRoot.count + 1))
+    }
+
+    func formation(for reference: FormationReference?) -> FormationDefinition? {
+        guard let referencePath = reference?.resourcePath else { return nil }
+        return formations.first { resourcePath(for: $0.fileURL) == referencePath }?.definition.formation
+    }
+
+    func path(for reference: PathReference?) -> MovementPathDefinition? {
+        guard let referencePath = reference?.resourcePath else { return nil }
+        return paths.first { resourcePath(for: $0.fileURL) == referencePath }?.definition.path
+    }
+
+    func mission(for resourcePath: String?) -> MissionDefinition? {
+        guard let resourcePath else { return nil }
+        return missions.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
+    }
+
     func selectWorld(_ document: WorldDocument) {
         selection = .world(document.fileURL)
         selectedCellID = nil
@@ -590,6 +613,72 @@ final class EditorWorkspace: ObservableObject {
         self.selectedCellID = nil
     }
 
+    func createMissionDefinitionForSelectedCell() {
+        guard let world = selectedWorld, let cell = selectedCell else { return }
+        guard [.mission, .boss].contains(cell.kind), cell.missionResourcePath == nil else { return }
+
+        let linkedMissions = world.definition.cells.compactMap { mission(for: $0.missionResourcePath) }
+        let locationID = linkedMissions.first?.metadata.locationId ?? world.definition.id.lowercased()
+        let missionNumber = (missions
+            .filter { $0.definition.metadata.locationId == locationID }
+            .map { $0.definition.metadata.missionNumber }
+            .max() ?? 0) + 1
+        let missionID = "\(locationID)_\(missionNumber)"
+        let resourcePath = "res://assets/missions/\(locationID)/\(missionNumber).json"
+        let fallbackBackground = resourcePathForFirstBackground() ?? "res://assets/backgrounds/location1_field.json"
+        guard let projectRoot else { return }
+        let fileURL = projectRoot
+            .appendingPathComponent("godot/assets/missions/\(locationID)", isDirectory: true)
+            .appendingPathComponent("\(missionNumber).json")
+
+        guard !fileManager.fileExists(atPath: fileURL.path) else {
+            errorMessage = "A mission definition already exists at \(resourcePath)."
+            return
+        }
+
+        let definition = MissionDefinition(
+            schemaVersion: 1,
+            id: missionID,
+            authoringStatus: .draft,
+            background: .init(resourcePath: fallbackBackground),
+            metadata: .init(
+                locationId: locationID,
+                missionNumber: missionNumber,
+                displayName: cell.displayName,
+                recommendedHeroLevel: missionNumber,
+                starObjectives: [.init(kind: .completeMission), .init(kind: .finishWithHealth, minimumPercentage: 0.75), .init(kind: .defeatAllEnemies)]
+            ),
+            completion: .init(kind: .clearAllWaves),
+            timeline: []
+        )
+
+        do {
+            try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try ContentJSON.encode(definition).write(to: fileURL, options: .atomic)
+            let document = MissionDocument(fileURL: fileURL, definition: definition)
+            missions.append(document)
+            missions.sort { lhs, rhs in
+                let a = lhs.definition.metadata, b = rhs.definition.metadata
+                return a.locationId == b.locationId ? a.missionNumber < b.missionNumber : a.locationId < b.locationId
+            }
+            updateSelectedCell {
+                $0.missionId = missionID
+                $0.missionResourcePath = resourcePath
+            }
+            saveSelectedWorld()
+            selectMission(document)
+            statusMessage = "Created and linked Mission \(missionNumber)."
+        } catch {
+            errorMessage = "Could not create the mission definition: \(error.localizedDescription)"
+        }
+    }
+
+    private func resourcePathForFirstBackground() -> String? {
+        guard let projectRoot else { return nil }
+        let backgrounds = recursiveJSONFiles(at: projectRoot.appendingPathComponent("godot/assets/backgrounds", isDirectory: true))
+        return backgrounds.sorted { $0.path < $1.path }.first.flatMap(resourcePath(for:))
+    }
+
     func saveSelectedWorld() {
         guard let document = selectedWorld else { return }
         do {
@@ -764,7 +853,14 @@ final class EditorWorkspace: ObservableObject {
                 if spawn.enemy.level < 1 {
                     add(.error, "mission.enemy.level", "Enemy level must be at least 1.", path + ["enemy", "level"])
                 }
-                if spawn.formation.offsets().isEmpty {
+                if let reference = spawn.formationReference, formation(for: reference) == nil {
+                    add(.error, "mission.formation.reference", "Event \(index + 1) references a missing saved formation.", path + ["formationReference"])
+                }
+                if let reference = spawn.pathReference, self.path(for: reference) == nil {
+                    add(.error, "mission.path.reference", "Event \(index + 1) references a missing saved path.", path + ["pathReference"])
+                }
+                let formationDefinition = formation(for: spawn.formationReference) ?? spawn.formation
+                if formationDefinition.offsets().isEmpty {
                     add(.error, "mission.formation.empty", "A spawn formation needs at least one member.", path + ["formation"])
                 }
             }
@@ -856,6 +952,12 @@ final class EditorWorkspace: ObservableObject {
                 add("path.\(field).invalid", "\(field) must be greater than zero.", ["path", field])
             }
         }
+        func validLoopStart(_ value: Double?, duration: Double) {
+            guard let value else { return }
+            if !value.isFinite || value < 0 || value >= duration {
+                add("path.loopStart.invalid", "Repeat-from time must be at least zero and less than the duration.", ["path", "loopStart"])
+            }
+        }
         switch document.path {
         case let .straight(value):
             positive(value.speed, "speed")
@@ -868,6 +970,10 @@ final class EditorWorkspace: ObservableObject {
             }
         case let .waypoints(value):
             positive(value.duration, "duration")
+            validLoopStart(value.loopStart, duration: value.duration)
+            if let loopToPoint = value.loopToPoint, !value.points.indices.contains(loopToPoint) {
+                add("path.loopToPoint.invalid", "Loop waypoint must be one of this path's waypoints.", ["path", "loopToPoint"])
+            }
             if value.points.count < 2 {
                 add("path.points.count", "A waypoint path needs at least two points.", ["path", "points"])
             }
@@ -876,6 +982,7 @@ final class EditorWorkspace: ObservableObject {
             }
         case let .bezier(value):
             positive(value.duration, "duration")
+            validLoopStart(value.loopStart, duration: value.duration)
             let points: [(String, MovementPathPointDefinition)] = [
                 ("start", value.start), ("control1", value.control1),
                 ("control2", value.control2), ("end", value.end)

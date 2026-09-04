@@ -24,6 +24,7 @@ struct WorldEditorView: View {
                 world: document.definition,
                 selectedCellID: $workspace.selectedCellID,
                 assetURL: workspace.assetURL,
+                missionNumber: { workspace.mission(for: $0)?.metadata.missionNumber },
                 moveCell: workspace.moveCell
             )
         }
@@ -35,6 +36,7 @@ private struct WorldCanvas: View {
     let world: WorldDefinition
     @Binding var selectedCellID: String?
     let assetURL: (String) -> URL?
+    let missionNumber: (String?) -> Int?
     let moveCell: (String, WorldGridCoordinate) -> Void
 
     private let tileWidth: CGFloat = 96
@@ -66,6 +68,7 @@ private struct WorldCanvas: View {
                         cell: cell,
                         isSelected: selectedCellID == cell.id,
                         imageURL: assetURL(cell.tileName),
+                        missionNumber: missionNumber(cell.missionResourcePath),
                         tileWidth: tileWidth,
                         diamondHeight: diamondHeight
                     )
@@ -159,6 +162,7 @@ private struct WorldCellTile: View {
     let cell: WorldCellDefinition
     let isSelected: Bool
     let imageURL: URL?
+    let missionNumber: Int?
     let tileWidth: CGFloat
     let diamondHeight: CGFloat
 
@@ -185,6 +189,16 @@ private struct WorldCellTile: View {
                 .background(kindSymbolColor, in: Circle())
                 .foregroundStyle(.white)
                 .allowsHitTesting(false)
+
+            if let missionNumber {
+                Text("M\(missionNumber)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(.white.opacity(0.9), in: Capsule())
+                    .offset(x: tileWidth * 0.30, y: -tileWidth * 0.30)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(width: tileWidth, height: tileWidth)
         .shadow(color: isSelected ? .accentColor.opacity(0.35) : .clear, radius: 8)
@@ -329,6 +343,13 @@ struct WorldInspector: View {
                 Section("Mission") {
                     TextField("Mission ID", text: optionalCellBinding(\.missionId))
                     TextField("Resource path", text: optionalCellBinding(\.missionResourcePath))
+                    if let mission = workspace.mission(for: cell.missionResourcePath) {
+                        Label("Mission \(mission.metadata.missionNumber)", systemImage: "number.circle.fill")
+                            .foregroundStyle(.secondary)
+                    } else if [.mission, .boss].contains(cell.kind), cell.missionResourcePath == nil {
+                        Button("Create Mission Definition", action: workspace.createMissionDefinitionForSelectedCell)
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
             }
             Section {

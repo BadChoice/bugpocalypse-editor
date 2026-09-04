@@ -18,6 +18,7 @@ struct MissionEditorView: View {
             VStack(spacing: 12) {
                 MissionPreview(
                     mission: document.definition,
+                    workspace: workspace,
                     playhead: playhead,
                     selectedEventIndex: workspace.selectedMissionEventIndex,
                     enemyAssetURL: workspace.enemyAssetURL
@@ -144,6 +145,13 @@ private struct TimelineEventCard: View {
             HStack {
                 Image(systemName: icon).foregroundStyle(color)
                 Text(title).font(.caption.bold()).lineLimit(1)
+                if case let .spawnFormation(value) = event.action {
+                    Text("Lv \(value.enemy.level)")
+                        .font(.system(.caption2, design: .rounded).bold())
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .foregroundStyle(.white)
+                        .background(color, in: Capsule())
+                }
             }
             Text(String(format: "%.2f s", event.at))
                 .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
@@ -165,9 +173,16 @@ private struct TimelineEventCard: View {
     }
     private var detail: String {
         switch event.action {
-        case let .spawnFormation(value): "\(value.formation.offsets().count) × \(value.formation.kind.rawValue)"
-        case let .zoomOut(value): String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
-        case let .zoomIn(value): String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
+        case let .spawnFormation(value):
+            if value.formationReference != nil || value.pathReference != nil {
+                return [
+                    value.formationReference == nil ? nil : "saved formation",
+                    value.pathReference == nil ? nil : "saved path"
+                ].compactMap { $0 }.joined(separator: " · ")
+            }
+            return "\(value.formation.offsets().count) × \(value.formation.kind.rawValue)"
+        case let .zoomOut(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
+        case let .zoomIn(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
         }
     }
     private var icon: String { if case .spawnFormation = event.action { "ant.fill" } else { "camera.fill" } }
@@ -176,6 +191,7 @@ private struct TimelineEventCard: View {
 
 private struct MissionPreview: View {
     let mission: MissionDefinition
+    @ObservedObject var workspace: EditorWorkspace
     let playhead: Double
     let selectedEventIndex: Int?
     let enemyAssetURL: (String) -> URL?
@@ -218,8 +234,9 @@ private struct MissionPreview: View {
     @ViewBuilder
     private func formation(_ spawn: SpawnFormationEvent, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
         let anchorX = spawn.spawnPosition.edge == .right ? 640 + spawn.spawnPosition.xOffset : -spawn.spawnPosition.xOffset
-        let path = sampledPath(spawn.path, elapsed: elapsed)
-        ForEach(Array(spawn.formation.offsets().enumerated()), id: \.offset) { index, offset in
+        let path = sampledPath(workspace.path(for: spawn.pathReference) ?? spawn.path, elapsed: elapsed)
+        let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
+        ForEach(Array(formation.offsets().enumerated()), id: \.offset) { index, offset in
             let position = CGPoint(
                 x: origin.x + (anchorX + offset.x + path.x) * scale,
                 y: origin.y + (spawn.spawnPosition.y + offset.y + path.y) * scale
@@ -239,19 +256,14 @@ private struct MissionPreview: View {
             return path.offset(elapsed: elapsed)
         case let .waypoints(value):
             guard value.points.count >= 2, value.duration > 0 else { return .init(x: 0, y: 0) }
-            let progress = min(max(elapsed / value.duration, 0), 1)
-            let segmentCount = value.points.count - 1
-            let route = progress * Double(segmentCount)
-            let index = min(Int(route), segmentCount - 1)
-            let amount = route - Double(index)
-            let start = value.points[index], end = value.points[index + 1], first = value.points[0]
+            let point = value.point(at: elapsed), first = value.points[0]
             return .init(
-                x: ((start.x + (end.x - start.x) * amount) - first.x) * 640,
-                y: ((start.y + (end.y - start.y) * amount) - first.y) * 360
+                x: (point.x - first.x) * 640,
+                y: (point.y - first.y) * 360
             )
         case let .bezier(value):
             guard value.duration > 0 else { return .init(x: 0, y: 0) }
-            let point = value.point(at: elapsed / value.duration)
+            let point = value.point(at: value.effectiveElapsed(at: elapsed) / value.duration)
             return .init(
                 x: (point.x - value.start.x) * 640,
                 y: (point.y - value.start.y) * 360
@@ -389,16 +401,42 @@ struct MissionInspector: View {
             TextField("Y", value: spawnBinding(\.spawnPosition.y, fallback: spawn.spawnPosition.y), format: .number)
         }
         Section("Formation") {
-            Picker("Kind", selection: formationKindBinding) {
-                ForEach(FormationKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+            Picker("Source", selection: formationSourceBinding) {
+                Text("Inline").tag(EncounterSource.inline)
+                Text("Saved formation").tag(EncounterSource.saved)
             }
-            formationSpecificFields(spawn.formation)
+            if spawn.formationReference == nil {
+                Picker("Kind", selection: formationKindBinding) {
+                    ForEach(FormationKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+                }
+                formationSpecificFields(spawn.formation)
+            } else {
+                Picker("Formation", selection: formationReferencePathBinding) {
+                    ForEach(workspace.formations) { document in
+                        Text(document.definition.name).tag(workspace.resourcePath(for: document.fileURL) ?? "")
+                    }
+                }
+                Text("This event uses the saved formation at runtime.").font(.caption).foregroundStyle(.secondary)
+            }
         }
         Section("Movement Path") {
-            Picker("Kind", selection: pathKindBinding) {
-                ForEach(MovementPathKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+            Picker("Source", selection: pathSourceBinding) {
+                Text("Inline").tag(EncounterSource.inline)
+                Text("Saved path").tag(EncounterSource.saved)
             }
-            pathSpecificFields(spawn.path)
+            if spawn.pathReference == nil {
+                Picker("Kind", selection: pathKindBinding) {
+                    ForEach(MovementPathKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+                }
+                pathSpecificFields(spawn.path)
+            } else {
+                Picker("Path", selection: pathReferencePathBinding) {
+                    ForEach(workspace.paths) { document in
+                        Text(document.definition.name).tag(workspace.resourcePath(for: document.fileURL) ?? "")
+                    }
+                }
+                Text("This event uses the saved path at runtime.").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -444,10 +482,20 @@ struct MissionInspector: View {
             TextField("Member phase", value: sineBinding(\.phaseOffset, fallback: value.phaseOffset), format: .number)
         case let .waypoints(value):
             TextField("Duration (seconds)", value: waypointBinding(\.duration, fallback: value.duration), format: .number)
+            Toggle("Loop after completion", isOn: waypointLoopBinding)
+            if value.loopToPoint != nil {
+                Picker("Loop to waypoint", selection: waypointLoopToBinding) {
+                    ForEach(value.points.indices, id: \.self) { Text("Point \($0 + 1)").tag($0) }
+                }
+            }
             LabeledContent("Points", value: "\(value.points.count)")
-            Text("Waypoint handles will become draggable in the path-authoring pass.").font(.caption).foregroundStyle(.secondary)
+            Text("Edit handles and the loop start in the Paths editor.").font(.caption).foregroundStyle(.secondary)
         case let .bezier(value):
             TextField("Duration (seconds)", value: bezierBinding(\.duration, fallback: value.duration), format: .number)
+            Toggle("Loop after completion", isOn: bezierLoopBinding)
+            if value.loopStart != nil {
+                TextField("Repeat from (seconds)", value: bezierLoopStartBinding(fallback: value.loopStart ?? 0), format: .number)
+            }
             Text("Edit this curve's handles in the Paths editor.").font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -473,6 +521,7 @@ struct MissionInspector: View {
     }
 
     private enum EventEditorKind: Hashable { case spawnFormation, zoomOut, zoomIn }
+    private enum EncounterSource: Hashable { case inline, saved }
     private var eventTypeBinding: Binding<EventEditorKind> {
         Binding(get: {
             switch selectedEvent?.action {
@@ -521,6 +570,10 @@ struct MissionInspector: View {
 
     private var formationKindBinding: Binding<FormationKind> { Binding(get: { if case let .spawnFormation(v)? = selectedEvent?.action { v.formation.kind } else { .line } }, set: { kind in mutateSpawn { $0.formation = defaultFormation(kind) } }) }
     private var pathKindBinding: Binding<MovementPathKind> { Binding(get: { if case let .spawnFormation(v)? = selectedEvent?.action { v.path.kind } else { .straight } }, set: { kind in mutateSpawn { $0.path = defaultPath(kind) } }) }
+    private var formationSourceBinding: Binding<EncounterSource> { Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action, value.formationReference != nil { .saved } else { .inline } }, set: { source in mutateSpawn { spawn in switch source { case .inline: spawn.formationReference = nil; case .saved: if let document = workspace.formations.first, let path = workspace.resourcePath(for: document.fileURL) { spawn.formationReference = .init(resourcePath: path) } } } }) }
+    private var pathSourceBinding: Binding<EncounterSource> { Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action, value.pathReference != nil { .saved } else { .inline } }, set: { source in mutateSpawn { spawn in switch source { case .inline: spawn.pathReference = nil; case .saved: if let document = workspace.paths.first, let path = workspace.resourcePath(for: document.fileURL) { spawn.pathReference = .init(resourcePath: path) } } } }) }
+    private var formationReferencePathBinding: Binding<String> { Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action { value.formationReference?.resourcePath ?? "" } else { "" } }, set: { path in mutateSpawn { $0.formationReference = .init(resourcePath: path) } }) }
+    private var pathReferencePathBinding: Binding<String> { Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action { value.pathReference?.resourcePath ?? "" } else { "" } }, set: { path in mutateSpawn { $0.pathReference = .init(resourcePath: path) } }) }
 
     private func formationBinding<Value, Payload>(_ extract: @escaping (FormationDefinition) -> Payload?, _ wrap: @escaping (Payload) -> FormationDefinition, _ keyPath: WritableKeyPath<Payload, Value>, fallback: Value) -> Binding<Value> {
         Binding(get: { guard case let .spawnFormation(spawn)? = selectedEvent?.action, let value = extract(spawn.formation) else { return fallback }; return value[keyPath: keyPath] }, set: { newValue in mutateSpawn { spawn in guard var value = extract(spawn.formation) else { return }; value[keyPath: keyPath] = newValue; spawn.formation = wrap(value) } })
@@ -538,6 +591,12 @@ struct MissionInspector: View {
     private func sineBinding<Value>(_ kp: WritableKeyPath<SinePath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .sine(v) = $0 { v } else { nil } }, MovementPathDefinition.sine, kp, fallback: fallback) }
     private func waypointBinding<Value>(_ kp: WritableKeyPath<WaypointPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .waypoints(v) = $0 { v } else { nil } }, MovementPathDefinition.waypoints, kp, fallback: fallback) }
     private func bezierBinding<Value>(_ kp: WritableKeyPath<BezierPath, Value>, fallback: Value) -> Binding<Value> { pathBinding({ if case let .bezier(v) = $0 { v } else { nil } }, MovementPathDefinition.bezier, kp, fallback: fallback) }
+
+    private var waypointLoopBinding: Binding<Bool> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .waypoints(value) = spawn.path { value.loopToPoint != nil } else { false } }, set: { enabled in mutateSpawn { spawn in guard case var .waypoints(value) = spawn.path else { return }; value.loopToPoint = enabled ? (value.loopToPoint ?? 0) : nil; spawn.path = .waypoints(value) } }) }
+    private var waypointLoopToBinding: Binding<Int> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .waypoints(value) = spawn.path { value.loopToPoint ?? 0 } else { 0 } }, set: { index in mutateSpawn { spawn in guard case var .waypoints(value) = spawn.path else { return }; value.loopToPoint = index; spawn.path = .waypoints(value) } }) }
+    private var bezierLoopBinding: Binding<Bool> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .bezier(value) = spawn.path { value.loopStart != nil } else { false } }, set: { enabled in mutateSpawn { spawn in guard case var .bezier(value) = spawn.path else { return }; value.loopStart = enabled ? (value.loopStart ?? 0) : nil; spawn.path = .bezier(value) } }) }
+    private func waypointLoopStartBinding(fallback: Double) -> Binding<Double> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .waypoints(value) = spawn.path { value.loopStart ?? fallback } else { fallback } }, set: { newValue in mutateSpawn { spawn in guard case var .waypoints(value) = spawn.path else { return }; value.loopStart = newValue; spawn.path = .waypoints(value) } }) }
+    private func bezierLoopStartBinding(fallback: Double) -> Binding<Double> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .bezier(value) = spawn.path { value.loopStart ?? fallback } else { fallback } }, set: { newValue in mutateSpawn { spawn in guard case var .bezier(value) = spawn.path else { return }; value.loopStart = newValue; spawn.path = .bezier(value) } }) }
 
     private var occupiedSlotsBinding: Binding<String> { Binding(get: { if case let .spawnFormation(spawn)? = selectedEvent?.action, case let .slottedLine(v) = spawn.formation { v.occupiedSlots.map(String.init).joined(separator: ", ") } else { "" } }, set: { text in mutateSpawn { spawn in guard case var .slottedLine(v) = spawn.formation else { return }; v.occupiedSlots = text.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }; spawn.formation = .slottedLine(v) } }) }
     private var optionalSeedBinding: Binding<Int> { Binding(

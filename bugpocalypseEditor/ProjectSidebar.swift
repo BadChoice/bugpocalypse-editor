@@ -34,6 +34,8 @@ struct ProjectSidebar: View {
                                 Image(systemName: "flag.fill").foregroundStyle(.secondary)
                                 Text(document.definition.metadata.displayName).lineLimit(1)
                                 Spacer(minLength: 4)
+                                Text("M\(document.definition.metadata.missionNumber)")
+                                    .font(.caption2.bold()).foregroundStyle(.secondary)
                                 Text("\(document.definition.timeline.count)")
                                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                                 if document.definition.authoringStatus == .draft {
