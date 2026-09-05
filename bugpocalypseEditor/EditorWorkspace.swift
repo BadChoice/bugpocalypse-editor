@@ -1031,7 +1031,13 @@ final class EditorWorkspace: ObservableObject {
             let points: [(String, MovementPathPointDefinition)] = [
                 ("start", value.start), ("control1", value.control1),
                 ("control2", value.control2), ("end", value.end)
-            ]
+            ] + value.additionalSegments.enumerated().flatMap { index, segment in
+                [
+                    ("segments.\(index).control1", segment.control1),
+                    ("segments.\(index).control2", segment.control2),
+                    ("segments.\(index).end", segment.end)
+                ]
+            }
             for (field, point) in points where !point.x.isFinite || !point.y.isFinite {
                 add("path.bezier.point.invalid", "Bézier \(field) needs finite coordinates.", ["path", field])
             }

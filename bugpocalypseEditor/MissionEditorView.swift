@@ -264,8 +264,9 @@ private struct MissionPreview: View {
                 x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x) * scale,
                 y: origin.y + ((usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y) * scale
             )
+            let spriteSize = enemyPreviewSize(for: spawn.enemy.id)
             EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected)
-                .frame(width: 42 * scale, height: 42 * scale)
+                .frame(width: spriteSize.width * scale, height: spriteSize.height * scale)
                 .position(position)
                 .overlay(alignment: .top) {
                     Text("Lv \(spawn.enemy.level)")
@@ -274,7 +275,7 @@ private struct MissionPreview: View {
                         .padding(.horizontal, max(3, 4 * scale))
                         .padding(.vertical, max(1, 2 * scale))
                         .background(.black.opacity(0.78), in: Capsule())
-                        .offset(y: -max(14, 24 * scale))
+                        .offset(y: -max(14, spriteSize.height * scale / 2 + 8 * scale))
                         .allowsHitTesting(false)
                 }
                 .overlay(alignment: .bottom) {
@@ -283,6 +284,16 @@ private struct MissionPreview: View {
                 .contentShape(Circle())
                 .onTapGesture { selectEvent(eventIndex, eventTime) }
         }
+    }
+
+    /// Runtime sprites use their atlas dimensions without a common size
+    /// normalization. Preserve those dimensions in the editor so bosses and
+    /// heavy enemies read at their intended scale.
+    private func enemyPreviewSize(for enemyID: String) -> CGSize {
+        guard let url = enemyAssetURL(enemyID), let image = NSImage(contentsOf: url) else {
+            return CGSize(width: 42, height: 42)
+        }
+        return CGSize(width: max(1, image.size.width), height: max(1, image.size.height))
     }
 
     private func sampledPath(_ path: MovementPathDefinition, elapsed: Double) -> ContentPoint {

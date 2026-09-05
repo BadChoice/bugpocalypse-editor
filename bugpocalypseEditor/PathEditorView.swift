@@ -38,7 +38,7 @@ struct PathEditorView: View {
             Toggle("Trace", isOn: $showTrace).toggleStyle(.button)
             Toggle("Times", isOn: $showSampledTimes).toggleStyle(.button)
             HStack(spacing: 8) {
-                Button { zoom = max(0.5, zoom - 0.25) } label: {
+                Button { zoom = max(0.25, zoom - 0.25) } label: {
                     Image(systemName: "minus.magnifyingglass")
                 }
                 Text("\(Int(zoom * 100))%")
@@ -60,7 +60,7 @@ struct PathEditorView: View {
         case let .straight(value): "Straight · \(value.speed.formatted()) px/s"
         case let .sine(value): "Sine · \(value.speed.formatted()) px/s · \(value.amplitude.formatted()) px amplitude"
         case let .waypoints(value): "Waypoints · \(value.points.count) points · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
-        case let .bezier(value): "Bézier · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
+        case let .bezier(value): "Bézier · \(value.segmentCount) segment\(value.segmentCount == 1 ? "" : "s") · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
         }
     }
 
@@ -77,7 +77,16 @@ struct PathEditorView: View {
                 case 1: value.control1 = point
                 case 2: value.control2 = point
                 case 3: value.end = point
-                default: return
+                default:
+                    let segmentIndex = (index - 4) / 3
+                    let controlIndex = (index - 4) % 3
+                    guard value.additionalSegments.indices.contains(segmentIndex) else { return }
+                    switch controlIndex {
+                    case 0: value.additionalSegments[segmentIndex].control1 = point
+                    case 1: value.additionalSegments[segmentIndex].control2 = point
+                    case 2: value.additionalSegments[segmentIndex].end = point
+                    default: return
+                    }
                 }
                 document.path = .bezier(value)
             default: return
@@ -246,12 +255,22 @@ private struct PathCanvas: View {
         case let .waypoints(value):
             return value.points.enumerated().map { .init(id: $0.offset, label: "\($0.offset + 1)", accessibilityLabel: "Waypoint \($0.offset + 1)", value: $0.element) }
         case let .bezier(value):
-            return [
-                .init(id: 0, label: "S", accessibilityLabel: "Start", value: value.start),
-                .init(id: 1, label: "1", accessibilityLabel: "Control 1", value: value.control1),
-                .init(id: 2, label: "2", accessibilityLabel: "Control 2", value: value.control2),
-                .init(id: 3, label: "E", accessibilityLabel: "End", value: value.end)
+            let firstSegment: [EditablePathPoint] = [
+                EditablePathPoint(id: 0, label: "S", accessibilityLabel: "Start", value: value.start),
+                EditablePathPoint(id: 1, label: "1", accessibilityLabel: "Control 1", value: value.control1),
+                EditablePathPoint(id: 2, label: "2", accessibilityLabel: "Control 2", value: value.control2),
+                EditablePathPoint(id: 3, label: "E", accessibilityLabel: "End", value: value.end)
             ]
+            let additional = value.additionalSegments.enumerated().flatMap { segmentIndex, segment in
+                let id = 4 + segmentIndex * 3
+                let number = segmentIndex + 2
+                return [
+                    EditablePathPoint(id: id, label: "\(number)·1", accessibilityLabel: "Segment \(number) control 1", value: segment.control1),
+                    EditablePathPoint(id: id + 1, label: "\(number)·2", accessibilityLabel: "Segment \(number) control 2", value: segment.control2),
+                    EditablePathPoint(id: id + 2, label: "\(number)·E", accessibilityLabel: "Segment \(number) end", value: segment.end)
+                ]
+            }
+            return firstSegment + additional
         case .straight, .sine: return []
         }
     }
@@ -420,6 +439,17 @@ struct PathInspector: View {
             bezierPoint("Control 1", index: 1, point: value.control1)
             bezierPoint("Control 2", index: 2, point: value.control2)
             bezierPoint("End", index: 3, point: value.end)
+            ForEach(Array(value.additionalSegments.enumerated()), id: \.offset) { index, segment in
+                Text("Segment \(index + 2) — drag its controls directly on the canvas.")
+                    .font(.caption).foregroundStyle(.secondary)
+                bezierPoint("Segment \(index + 2) Control 1", index: 4 + index * 3, point: segment.control1)
+                bezierPoint("Segment \(index + 2) Control 2", index: 5 + index * 3, point: segment.control2)
+                bezierPoint("Segment \(index + 2) End", index: 6 + index * 3, point: segment.end)
+            }
+            Button("Add Curve Segment", action: addBezierSegment)
+            if !value.additionalSegments.isEmpty {
+                Button("Remove Last Segment", role: .destructive, action: removeBezierSegment)
+            }
             Text("Coordinates are normalized; values beyond 0…1 place points off-screen.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -572,12 +602,21 @@ struct PathInspector: View {
         Binding(get: {
             guard let path = workspace.selectedPath?.definition.path,
                   case let .bezier(value) = path else { return fallback }
-            switch index {
-            case 0: return value.start[keyPath: keyPath]
-            case 1: return value.control1[keyPath: keyPath]
-            case 2: return value.control2[keyPath: keyPath]
-            case 3: return value.end[keyPath: keyPath]
-            default: return fallback
+                switch index {
+                case 0: return value.start[keyPath: keyPath]
+                case 1: return value.control1[keyPath: keyPath]
+                case 2: return value.control2[keyPath: keyPath]
+                case 3: return value.end[keyPath: keyPath]
+                default:
+                    let segmentIndex = (index - 4) / 3
+                    let controlIndex = (index - 4) % 3
+                    guard value.additionalSegments.indices.contains(segmentIndex) else { return fallback }
+                    switch controlIndex {
+                    case 0: return value.additionalSegments[segmentIndex].control1[keyPath: keyPath]
+                    case 1: return value.additionalSegments[segmentIndex].control2[keyPath: keyPath]
+                    case 2: return value.additionalSegments[segmentIndex].end[keyPath: keyPath]
+                    default: return fallback
+                    }
             }
         }, set: { newValue in
             workspace.updateSelectedPath { document in
@@ -587,11 +626,50 @@ struct PathInspector: View {
                 case 1: value.control1[keyPath: keyPath] = newValue
                 case 2: value.control2[keyPath: keyPath] = newValue
                 case 3: value.end[keyPath: keyPath] = newValue
-                default: return
+                default:
+                    let segmentIndex = (index - 4) / 3
+                    let controlIndex = (index - 4) % 3
+                    guard value.additionalSegments.indices.contains(segmentIndex) else { return }
+                    switch controlIndex {
+                    case 0: value.additionalSegments[segmentIndex].control1[keyPath: keyPath] = newValue
+                    case 1: value.additionalSegments[segmentIndex].control2[keyPath: keyPath] = newValue
+                    case 2: value.additionalSegments[segmentIndex].end[keyPath: keyPath] = newValue
+                    default: return
+                    }
                 }
                 document.path = .bezier(value)
             }
         })
+    }
+
+    private func addBezierSegment() {
+        workspace.updateSelectedPath { document in
+            guard case var .bezier(value) = document.path else { return }
+            let previous = value.additionalSegments.last
+            let start = previous?.end ?? value.end
+            // New segments should be immediately editable. Aim their initial
+            // handles back toward the playable area rather than extending an
+            // exit tangent farther off-screen.
+            let target = MovementPathPointDefinition(x: 0.5, y: 0.5)
+            let deltaX = target.x - start.x
+            let deltaY = target.y - start.y
+            let length = max((deltaX * deltaX + deltaY * deltaY).squareRoot(), 0.001)
+            let step = MovementPathPointDefinition(x: deltaX / length * 0.12, y: deltaY / length * 0.12)
+            value.additionalSegments.append(.init(
+                control1: .init(x: start.x + step.x, y: start.y + step.y),
+                control2: .init(x: start.x + step.x * 2, y: start.y + step.y * 2),
+                end: .init(x: start.x + step.x * 3, y: start.y + step.y * 3)
+            ))
+            document.path = .bezier(value)
+        }
+    }
+
+    private func removeBezierSegment() {
+        workspace.updateSelectedPath { document in
+            guard case var .bezier(value) = document.path, !value.additionalSegments.isEmpty else { return }
+            value.additionalSegments.removeLast()
+            document.path = .bezier(value)
+        }
     }
 
     private func addPoint() {
