@@ -185,6 +185,7 @@ struct ProjectSidebar: View {
         case .v: "chevron.right"
         case .staggeredGrid: "square.grid.3x3"
         case .arc: "rainbow"
+        case .trail: "point.3.connected.trianglepath.dotted"
         case .freeform: "point.3.connected.trianglepath.dotted"
         }
     }

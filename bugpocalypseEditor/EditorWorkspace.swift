@@ -917,6 +917,8 @@ final class EditorWorkspace: ObservableObject {
             positive(value.count, "count"); positive(value.radius, "radius")
             if !value.startAngle.isFinite { add("formation.startAngle.invalid", "startAngle must be finite.", ["formation", "startAngle"]) }
             if !value.endAngle.isFinite { add("formation.endAngle.invalid", "endAngle must be finite.", ["formation", "endAngle"]) }
+        case let .trail(value):
+            positive(value.count, "count"); positive(value.followDelay, "followDelay")
         case let .freeform(value):
             if value.members.isEmpty { add("formation.members.empty", "A freeform formation needs at least one member.", ["formation", "members"]) }
             let ids = value.members.compactMap(\.id).filter { !$0.isEmpty }

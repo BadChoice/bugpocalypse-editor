@@ -247,13 +247,18 @@ private struct MissionPreview: View {
 
     @ViewBuilder
     private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
-        let anchorX = spawn.spawnPosition.edge == .right ? 640 + spawn.spawnPosition.xOffset : -spawn.spawnPosition.xOffset
-        let path = sampledPath(workspace.path(for: spawn.pathReference) ?? spawn.path, elapsed: elapsed)
+        let pathDefinition = workspace.path(for: spawn.pathReference) ?? spawn.path
         let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
         ForEach(Array(formation.offsets().enumerated()), id: \.offset) { index, offset in
+            let legacyAnchorX = spawn.spawnPosition.edge == .right ? 640 + spawn.spawnPosition.xOffset : -spawn.spawnPosition.xOffset
+            let usesAuthoredStart = pathDefinition.usesAuthoredStart
+            let path = sampledPath(
+                pathDefinition,
+                elapsed: max(0, elapsed - Double(index) * (formation.followDelay ?? 0))
+            )
             let position = CGPoint(
-                x: origin.x + (anchorX + offset.x + path.x) * scale,
-                y: origin.y + (spawn.spawnPosition.y + offset.y + path.y) * scale
+                x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x) * scale,
+                y: origin.y + ((usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y) * scale
             )
             EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected)
                 .frame(width: 42 * scale, height: 42 * scale)
@@ -282,18 +287,29 @@ private struct MissionPreview: View {
             return path.offset(elapsed: elapsed)
         case let .waypoints(value):
             guard value.points.count >= 2, value.duration > 0 else { return .init(x: 0, y: 0) }
-            let point = value.point(at: elapsed), first = value.points[0]
+            let point = value.point(at: elapsed)
             return .init(
-                x: (point.x - first.x) * 640,
-                y: (point.y - first.y) * 360
+                x: point.x * 640,
+                y: point.y * 360
             )
         case let .bezier(value):
             guard value.duration > 0 else { return .init(x: 0, y: 0) }
             let point = value.point(at: value.effectiveElapsed(at: elapsed) / value.duration)
             return .init(
-                x: (point.x - value.start.x) * 640,
-                y: (point.y - value.start.y) * 360
+                x: point.x * 640,
+                y: point.y * 360
             )
+        }
+    }
+}
+
+private extension MovementPathDefinition {
+    /// Normalized routes include their own entry point; the older pixel paths
+    /// continue to use the event's left/right spawn anchor.
+    var usesAuthoredStart: Bool {
+        switch self {
+        case .waypoints, .bezier: true
+        case .straight, .sine: false
         }
     }
 }
@@ -491,6 +507,10 @@ struct MissionInspector: View {
             TextField("Radius", value: arcBinding(\.radius, fallback: value.radius), format: .number)
             TextField("Start angle", value: arcBinding(\.startAngle, fallback: value.startAngle), format: .number)
             TextField("End angle", value: arcBinding(\.endAngle, fallback: value.endAngle), format: .number)
+        case let .trail(value):
+            Stepper("Count: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...50)
+            TextField("Follow delay (seconds)", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
+            Text("Each member follows the same route after this delay.").font(.caption).foregroundStyle(.secondary)
         case let .freeform(value):
             LabeledContent("Members", value: "\(value.members.count)")
             Text("Freeform point editing will use draggable preview handles in the next pass.").font(.caption).foregroundStyle(.secondary)
@@ -609,6 +629,7 @@ struct MissionInspector: View {
     private func vBinding<Value>(_ kp: WritableKeyPath<VFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .v(v) = $0 { v } else { nil } }, FormationDefinition.v, kp, fallback: fallback) }
     private func gridBinding<Value>(_ kp: WritableKeyPath<StaggeredGridFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .staggeredGrid(v) = $0 { v } else { nil } }, FormationDefinition.staggeredGrid, kp, fallback: fallback) }
     private func arcBinding<Value>(_ kp: WritableKeyPath<ArcFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .arc(v) = $0 { v } else { nil } }, FormationDefinition.arc, kp, fallback: fallback) }
+    private func trailBinding<Value>(_ kp: WritableKeyPath<TrailFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .trail(v) = $0 { v } else { nil } }, FormationDefinition.trail, kp, fallback: fallback) }
 
     private func pathBinding<Value, Payload>(_ extract: @escaping (MovementPathDefinition) -> Payload?, _ wrap: @escaping (Payload) -> MovementPathDefinition, _ kp: WritableKeyPath<Payload, Value>, fallback: Value) -> Binding<Value> {
         Binding(get: { guard case let .spawnFormation(spawn)? = selectedEvent?.action, let value = extract(spawn.path) else { return fallback }; return value[keyPath: kp] }, set: { newValue in mutateSpawn { spawn in guard var value = extract(spawn.path) else { return }; value[keyPath: kp] = newValue; spawn.path = wrap(value) } })
@@ -637,7 +658,7 @@ struct MissionInspector: View {
     private var zoomMultiplierBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.multiplier; case let .zoomIn(v): v.multiplier; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.multiplier = value; event.action = .zoomOut(v); case var .zoomIn(v): v.multiplier = value; event.action = .zoomIn(v); default: break } } }) }
     private var zoomDurationBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.duration; case let .zoomIn(v): v.duration; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.duration = max(0, value); event.action = .zoomOut(v); case var .zoomIn(v): v.duration = max(0, value); event.action = .zoomIn(v); default: break } } }) }
 
-    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
+    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
     private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
 }

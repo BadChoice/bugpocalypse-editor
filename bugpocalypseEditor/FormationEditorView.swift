@@ -226,6 +226,11 @@ struct FormationInspector: View {
                 pixels("Radius", arcBinding(\.radius, fallback: value.radius))
                 degrees("Start angle", arcBinding(\.startAngle, fallback: value.startAngle))
                 degrees("End angle", arcBinding(\.endAngle, fallback: value.endAngle))
+            case let .trail(value):
+                Stepper("Members: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...100)
+                TextField("Follow delay (seconds)", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
+                Text("Members follow the same path in sequence. Preview the result in a mission.")
+                    .font(.caption).foregroundStyle(.secondary)
             case let .freeform(value):
                 LabeledContent("Members", value: "\(value.members.count)")
                 Text("Drag members on the canvas or edit exact offsets below.")
@@ -303,6 +308,7 @@ struct FormationInspector: View {
     private func vBinding<Value>(_ kp: WritableKeyPath<VFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .v(v) = $0 { v } else { nil } }, FormationDefinition.v, kp, fallback: fallback) }
     private func gridBinding<Value>(_ kp: WritableKeyPath<StaggeredGridFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .staggeredGrid(v) = $0 { v } else { nil } }, FormationDefinition.staggeredGrid, kp, fallback: fallback) }
     private func arcBinding<Value>(_ kp: WritableKeyPath<ArcFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .arc(v) = $0 { v } else { nil } }, FormationDefinition.arc, kp, fallback: fallback) }
+    private func trailBinding<Value>(_ kp: WritableKeyPath<TrailFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .trail(v) = $0 { v } else { nil } }, FormationDefinition.trail, kp, fallback: fallback) }
 
     private func axisPicker(_ selection: Binding<FormationAxis>) -> some View {
         Picker("Axis", selection: selection) {
@@ -421,6 +427,7 @@ struct FormationInspector: View {
         case .v: .v(.init(count: 5, spacing: 36, depth: 28))
         case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48))
         case .arc: .arc(.init(count: 5, radius: 80, startAngle: 120, endAngle: 240))
+        case .trail: .trail(.init(count: 5, followDelay: 0.35))
         case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))]))
         }
     }
