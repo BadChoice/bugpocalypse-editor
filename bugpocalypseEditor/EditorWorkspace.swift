@@ -711,6 +711,49 @@ final class EditorWorkspace: ObservableObject {
         }
     }
 
+    /// Launches the selected mission directly in Godot for a quick runtime
+    /// check. The mission resource path is passed after `--`, where Godot
+    /// preserves it for the game's command-line reader.
+    func playSelectedMission() {
+        guard let projectRoot, let mission = selectedMission else { return }
+        let errors = missionDiagnostics(for: mission.definition).filter { $0.severity == .error }
+        guard errors.isEmpty else {
+            errorMessage = "The mission cannot be played: fix \(errors.count) structural error\(errors.count == 1 ? "" : "s") first."
+            return
+        }
+        guard let missionPath = resourcePath(for: mission.fileURL) else {
+            errorMessage = "The selected mission must be inside godot/assets to play it."
+            return
+        }
+
+        saveSelectedMission()
+        guard !mission.isDirty else { return }
+
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.godotengine.godot") else {
+            errorMessage = "Godot could not be found. Install Godot, then try Play Mission again."
+            return
+        }
+        let executableURL = appURL.appendingPathComponent("Contents/MacOS/Godot")
+        guard fileManager.isExecutableFile(atPath: executableURL.path) else {
+            errorMessage = "Godot's executable could not be found in \(appURL.lastPathComponent)."
+            return
+        }
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = [
+            "--path", projectRoot.appendingPathComponent("godot", isDirectory: true).path,
+            "res://mission_scene.tscn",
+            "--", "--mission=\(missionPath)"
+        ]
+        do {
+            try process.run()
+            statusMessage = "Playing \(mission.definition.metadata.displayName) in Godot."
+        } catch {
+            errorMessage = "Godot could not launch this mission: \(error.localizedDescription)"
+        }
+    }
+
     func saveSelectedFormation() {
         guard let document = selectedFormation else { return }
         let errors = formationDiagnostics(for: document.definition).filter { $0.severity == .error }

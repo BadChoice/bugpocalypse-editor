@@ -51,6 +51,10 @@ struct MissionEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Button(action: workspace.playSelectedMission) {
+                Label("Play Mission", systemImage: "play.fill")
+            }
+            .buttonStyle(.bordered)
             Menu {
                 Button("Spawn Formation") {
                     workspace.addMissionEvent(.spawnFormation(Self.defaultSpawn))
