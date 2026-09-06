@@ -11,6 +11,27 @@ import Testing
 @testable import bugpocalypseEditor
 
 struct bugpocalypseEditorTests {
+    @Test func dropAuthoringAddsRemovesAndPreservesOptionalJSONShape() {
+        let added = DropAuthoring.addingDefaultDrop(to: 2, in: nil)
+        #expect(added == [.init(kind: .focus, amount: 1, memberIndex: 2)])
+        #expect(DropAuthoring.addingDefaultDrop(to: 2, in: added) == added)
+        #expect(DropAuthoring.removingDrop(for: 2, in: added) == nil)
+    }
+
+    @Test func dropAuthoringReportsDuplicateInvalidAmountAndOutOfRangeTargets() {
+        let diagnostics = DropAuthoring.diagnostics(for: [
+            .init(kind: .focus, amount: 1, memberIndex: 0),
+            .init(kind: .coins, amount: 4, memberIndex: 0),
+            .init(kind: .rage, amount: 0, memberIndex: 1),
+            .init(kind: .health, amount: 5, memberIndex: 3)
+        ], memberCount: 2)
+
+        #expect(diagnostics.count == 3)
+        #expect(diagnostics.contains { $0.memberIndex == 0 && $0.message.contains("more than one") })
+        #expect(diagnostics.contains { $0.memberIndex == 1 && $0.message.contains("positive") })
+        #expect(diagnostics.contains { $0.memberIndex == 3 && $0.message.contains("has 2") })
+    }
+
     @MainActor
     @Test func reopensTheMostRecentlyOpenedProject() throws {
         let root = try makeCheckout(includeMission: false)

@@ -21,8 +21,10 @@ struct MissionEditorView: View {
                     workspace: workspace,
                     playhead: playhead,
                     selectedEventIndex: workspace.selectedMissionEventIndex,
+                    selectedMemberIndex: workspace.selectedFormationMemberIndex,
                     enemyAssetURL: workspace.enemyAssetURL,
-                    selectEvent: selectTimelineEvent
+                    selectEvent: selectTimelineEvent,
+                    selectMember: selectFormationMember
                 )
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .frame(maxHeight: 430)
@@ -140,9 +142,14 @@ struct MissionEditorView: View {
     private func timeText(_ value: Double) -> String { String(format: "%05.2f", value) }
 
     private func selectTimelineEvent(_ index: Int, _ at: Double) {
-        workspace.selectedMissionEventIndex = index
+        workspace.selectMissionEvent(index)
         playhead = at
         isPlaying = false
+    }
+
+    private func selectFormationMember(_ index: Int, _ eventIndex: Int, _ at: Double) {
+        selectTimelineEvent(eventIndex, at)
+        workspace.selectedFormationMemberIndex = index
     }
 
     private static let defaultSpawn = SpawnFormationEvent(
@@ -211,8 +218,10 @@ private struct MissionPreview: View {
     @ObservedObject var workspace: EditorWorkspace
     let playhead: Double
     let selectedEventIndex: Int?
+    let selectedMemberIndex: Int?
     let enemyAssetURL: (String) -> URL?
     let selectEvent: (Int, Double) -> Void
+    let selectMember: (Int, Int, Double) -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -223,7 +232,7 @@ private struct MissionPreview: View {
                 previewGrid(origin: origin, scale: scale)
                 ForEach(Array(mission.timeline.enumerated()), id: \.offset) { index, event in
                     if case let .spawnFormation(spawn) = event.action, event.at <= playhead {
-                        formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
+                        formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, selectedMember: selectedEventIndex == index ? selectedMemberIndex : nil, origin: origin, scale: scale)
                     }
                 }
                 Text("640 × 360  •  t = \(playhead, specifier: "%.2f") s")
@@ -250,9 +259,10 @@ private struct MissionPreview: View {
     }
 
     @ViewBuilder
-    private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
+    private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, selectedMember: Int?, origin: CGPoint, scale: CGFloat) -> some View {
         let pathDefinition = workspace.path(for: spawn.pathReference) ?? spawn.path
         let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
+        let dropDiagnostics = DropAuthoring.diagnostics(for: spawn.drops, memberCount: formation.offsets().count)
         ForEach(Array(formation.offsets().enumerated()), id: \.offset) { index, offset in
             let legacyAnchorX = spawn.spawnPosition.edge == .right ? 640 + spawn.spawnPosition.xOffset : -spawn.spawnPosition.xOffset
             let usesAuthoredStart = pathDefinition.usesAuthoredStart
@@ -265,7 +275,7 @@ private struct MissionPreview: View {
                 y: origin.y + ((usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y) * scale
             )
             let spriteSize = enemyPreviewSize(for: spawn.enemy.id)
-            EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected)
+            EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected && selectedMember == index)
                 .frame(width: spriteSize.width * scale, height: spriteSize.height * scale)
                 .position(position)
                 .overlay(alignment: .top) {
@@ -281,8 +291,21 @@ private struct MissionPreview: View {
                 .overlay(alignment: .bottom) {
                     if selected { Text("\(index)").font(.system(size: 8)).foregroundStyle(.white).offset(y: 12 * scale) }
                 }
+                .overlay(alignment: .topTrailing) {
+                    if let drop = DropAuthoring.drop(for: index, in: spawn.drops) {
+                        DropBadge(drop: drop, scale: scale)
+                            .offset(x: max(8, spriteSize.width * scale / 2 - 4), y: -max(8, spriteSize.height * scale / 2 - 4))
+                            .allowsHitTesting(false)
+                    }
+                }
                 .contentShape(Circle())
-                .onTapGesture { selectEvent(eventIndex, eventTime) }
+                .onTapGesture { selectMember(index, eventIndex, eventTime) }
+        }
+        if !dropDiagnostics.isEmpty {
+            Label("\(dropDiagnostics.count) invalid drop\(dropDiagnostics.count == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2.bold()).foregroundStyle(.orange)
+                .padding(5).background(.black.opacity(0.8), in: Capsule())
+                .position(x: origin.x + 580 * scale, y: origin.y + 20 * scale)
         }
     }
 
@@ -315,6 +338,25 @@ private struct MissionPreview: View {
                 y: point.y * 360
             )
         }
+    }
+}
+
+private struct DropBadge: View {
+    let drop: DropDefinition
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "gift.fill").font(.system(size: max(7, 10 * scale)))
+            Text("\(drop.amount)").font(.system(size: max(7, 9 * scale), weight: .bold, design: .rounded))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 3).padding(.vertical, 2)
+        .background(color, in: Capsule())
+    }
+
+    private var color: Color {
+        switch drop.kind { case .health: .green; case .focus: .cyan; case .rage: .red; case .coins: .yellow }
     }
 }
 
@@ -495,6 +537,41 @@ struct MissionInspector: View {
                 Text("This event uses the saved path at runtime.").font(.caption).foregroundStyle(.secondary)
             }
         }
+        dropsFields(spawn)
+    }
+
+    @ViewBuilder private func dropsFields(_ spawn: SpawnFormationEvent) -> some View {
+        let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
+        let memberCount = formation.offsets().count
+        let diagnostics = DropAuthoring.diagnostics(for: spawn.drops, memberCount: memberCount)
+        Section("Drops") {
+            Text("Assign one guaranteed pickup to a selected formation member.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array((spawn.drops ?? []).sorted { $0.memberIndex < $1.memberIndex }.enumerated()), id: \.offset) { _, drop in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Button("Enemy \(drop.memberIndex + 1)") { workspace.selectedFormationMemberIndex = drop.memberIndex }
+                            .buttonStyle(.link)
+                        Spacer()
+                        Button("Remove", role: .destructive) { removeDrop(for: drop.memberIndex) }.controlSize(.small)
+                    }
+                    Picker("Kind", selection: dropKindBinding(for: drop.memberIndex, fallback: drop.kind)) {
+                        ForEach(DropKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+                    }
+                    TextField("Amount", value: dropAmountBinding(for: drop.memberIndex, fallback: drop.amount), format: .number)
+                    if let diagnostic = diagnostics.first(where: { $0.memberIndex == drop.memberIndex }) {
+                        Label(diagnostic.message, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            Button("Add Drop") { addDrop() }.disabled(!canAddDrop)
+            if workspace.selectedFormationMemberIndex == nil {
+                Text("Select an enemy in the preview to add a drop.").font(.caption).foregroundStyle(.secondary)
+            } else if !canAddDrop {
+                Text("The selected enemy already has a drop or is outside this formation.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder private func formationSpecificFields(_ formation: FormationDefinition) -> some View {
@@ -628,6 +705,48 @@ struct MissionInspector: View {
         )
     }
     private func mutateSpawn(_ change: (inout SpawnFormationEvent) -> Void) { workspace.updateSelectedMissionEvent { event in guard case var .spawnFormation(value) = event.action else { return }; change(&value); event.action = .spawnFormation(value) } }
+
+    private var resolvedFormationMemberCount: Int {
+        guard case let .spawnFormation(spawn)? = selectedEvent?.action else { return 0 }
+        return (workspace.formation(for: spawn.formationReference) ?? spawn.formation).offsets().count
+    }
+    private var canAddDrop: Bool {
+        guard let memberIndex = workspace.selectedFormationMemberIndex,
+              (0..<resolvedFormationMemberCount).contains(memberIndex),
+              case let .spawnFormation(spawn)? = selectedEvent?.action else { return false }
+        return DropAuthoring.drop(for: memberIndex, in: spawn.drops) == nil
+    }
+    private func addDrop() {
+        guard let memberIndex = workspace.selectedFormationMemberIndex, canAddDrop else { return }
+        mutateSpawn { $0.drops = DropAuthoring.addingDefaultDrop(to: memberIndex, in: $0.drops) }
+    }
+    private func removeDrop(for memberIndex: Int) {
+        mutateSpawn { $0.drops = DropAuthoring.removingDrop(for: memberIndex, in: $0.drops) }
+    }
+    private func dropKindBinding(for memberIndex: Int, fallback: DropKind) -> Binding<DropKind> {
+        Binding(get: {
+            guard case let .spawnFormation(spawn)? = selectedEvent?.action else { return fallback }
+            return DropAuthoring.drop(for: memberIndex, in: spawn.drops)?.kind ?? fallback
+        }, set: { kind in
+            mutateSpawn { spawn in
+                guard var drop = DropAuthoring.drop(for: memberIndex, in: spawn.drops) else { return }
+                drop.kind = kind
+                spawn.drops = DropAuthoring.updatingDrop(drop, in: spawn.drops)
+            }
+        })
+    }
+    private func dropAmountBinding(for memberIndex: Int, fallback: Int) -> Binding<Int> {
+        Binding(get: {
+            guard case let .spawnFormation(spawn)? = selectedEvent?.action else { return fallback }
+            return DropAuthoring.drop(for: memberIndex, in: spawn.drops)?.amount ?? fallback
+        }, set: { amount in
+            mutateSpawn { spawn in
+                guard var drop = DropAuthoring.drop(for: memberIndex, in: spawn.drops) else { return }
+                drop.amount = amount
+                spawn.drops = DropAuthoring.updatingDrop(drop, in: spawn.drops)
+            }
+        })
+    }
 
     private var formationKindBinding: Binding<FormationKind> { Binding(get: { if case let .spawnFormation(v)? = selectedEvent?.action { v.formation.kind } else { .line } }, set: { kind in mutateSpawn { $0.formation = defaultFormation(kind) } }) }
     private var pathKindBinding: Binding<MovementPathKind> { Binding(get: { if case let .spawnFormation(v)? = selectedEvent?.action { v.path.kind } else { .straight } }, set: { kind in mutateSpawn { $0.path = defaultPath(kind) } }) }

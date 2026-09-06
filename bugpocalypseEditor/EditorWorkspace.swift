@@ -348,6 +348,7 @@ final class EditorWorkspace: ObservableObject {
         selection = .mission(document.fileURL)
         selectedCellID = nil
         selectedMissionEventIndex = nil
+        selectedFormationMemberIndex = nil
     }
 
     func selectFormation(_ document: FormationEditorDocument) {
@@ -508,11 +509,17 @@ final class EditorWorkspace: ObservableObject {
         }
     }
 
+    func selectMissionEvent(_ index: Int?) {
+        guard selectedMissionEventIndex != index else { return }
+        selectedMissionEventIndex = index
+        selectedFormationMemberIndex = nil
+    }
+
     func addMissionEvent(_ action: MissionTimelineEvent.Action) {
         guard let mission = selectedMission else { return }
         let at = ((mission.definition.timeline.map(\.at).max() ?? -2) + 2)
         updateSelectedMission { $0.timeline.append(.init(at: max(0, at), action: action)) }
-        selectedMissionEventIndex = mission.definition.timeline.count - 1
+        selectMissionEvent(mission.definition.timeline.count - 1)
     }
 
     func duplicateSelectedMissionEvent() {
@@ -522,7 +529,7 @@ final class EditorWorkspace: ObservableObject {
         var copy = mission.definition.timeline[index]
         copy.at += 1
         updateSelectedMission { $0.timeline.insert(copy, at: index + 1) }
-        selectedMissionEventIndex = index + 1
+        selectMissionEvent(index + 1)
     }
 
     func deleteSelectedMissionEvent() {
@@ -531,7 +538,7 @@ final class EditorWorkspace: ObservableObject {
             guard mission.timeline.indices.contains(index) else { return }
             mission.timeline.remove(at: index)
         }
-        selectedMissionEventIndex = nil
+        selectMissionEvent(nil)
     }
 
     func updateSelectedWorld(_ change: (inout WorldDefinition) -> Void) {
@@ -905,6 +912,12 @@ final class EditorWorkspace: ObservableObject {
                 let formationDefinition = formation(for: spawn.formationReference) ?? spawn.formation
                 if formationDefinition.offsets().isEmpty {
                     add(.error, "mission.formation.empty", "A spawn formation needs at least one member.", path + ["formation"])
+                }
+                for diagnostic in DropAuthoring.diagnostics(
+                    for: spawn.drops,
+                    memberCount: formationDefinition.offsets().count
+                ) {
+                    add(.error, "mission.drop.invalid", "Event \(index + 1): \(diagnostic.message)", path + ["drops", "\(diagnostic.memberIndex)"])
                 }
             }
         }
