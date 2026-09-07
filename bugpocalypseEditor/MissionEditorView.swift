@@ -146,7 +146,7 @@ struct MissionEditorView: View {
 
     private func selectTimelineEvent(_ index: Int, _ at: Double) {
         workspace.selectMissionEvent(index)
-        playhead = at
+        playhead = min(at + 2, missionDuration)
         isPlaying = false
     }
 
@@ -307,7 +307,6 @@ private struct MissionPreview: View {
             let spriteSize = enemyPreviewSize(for: spawn.enemy.id)
             EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected && selectedMember == index)
                 .frame(width: spriteSize.width * scale, height: spriteSize.height * scale)
-                .position(position)
                 .overlay(alignment: .top) {
                     Text("Lv \(spawn.enemy.level)")
                         .font(.system(size: max(7, 9 * scale), weight: .bold, design: .rounded))
@@ -330,6 +329,7 @@ private struct MissionPreview: View {
                 }
                 .contentShape(Circle())
                 .onTapGesture { selectMember(index, eventIndex, eventTime) }
+                .position(position)
         }
         if !dropDiagnostics.isEmpty {
             Label("\(dropDiagnostics.count) invalid drop\(dropDiagnostics.count == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
@@ -367,9 +367,9 @@ private struct MissionPreview: View {
         }
         .frame(width: bossSize.width * scale, height: bossSize.height * scale)
         .background(selected ? Color.accentColor.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 8))
-        .position(position)
         .contentShape(Rectangle())
         .onTapGesture { selectEvent(eventIndex, eventTime) }
+        .position(position)
     }
 
     private func bossPosition(for spawn: SpawnBossEvent, elapsed: Double) -> ContentPoint {
