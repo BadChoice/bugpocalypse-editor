@@ -200,7 +200,8 @@ struct bugpocalypseEditorTests {
         #expect(workspace.diagnostics.isEmpty)
 
         workspace.addMissionEvent(.zoomOut(.init(multiplier: 0.8, duration: 1)))
-        #expect(workspace.selectedMission?.definition.timeline.count == 2)
+        workspace.addMissionEvent(.spawnBoss(.init(id: "boss1", level: 11, y: 180)))
+        #expect(workspace.selectedMission?.definition.timeline.count == 3)
         #expect(workspace.selectedMission?.isDirty == true)
 
         workspace.saveSelectedMission()
@@ -210,7 +211,12 @@ struct bugpocalypseEditorTests {
             MissionDefinition.self,
             from: Data(contentsOf: root.appendingPathComponent("godot/assets/missions/test/1.json"))
         )
-        #expect(saved.timeline.count == 2)
+        #expect(saved.timeline.count == 3)
+        guard case let .spawnBoss(boss)? = saved.timeline.last?.action else {
+            Issue.record("The saved mission did not preserve the boss spawn event")
+            return
+        }
+        #expect(boss == .init(id: "boss1", level: 11, y: 180))
     }
 
     @MainActor

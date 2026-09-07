@@ -59,7 +59,7 @@ struct PathEditorView: View {
         switch document.definition.path {
         case let .straight(value): "Straight · \(value.speed.formatted()) px/s"
         case let .sine(value): "Sine · \(value.speed.formatted()) px/s · \(value.amplitude.formatted()) px amplitude"
-        case let .waypoints(value): "Waypoints · \(value.points.count) points · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
+        case let .waypoints(value): "Waypoints · \(value.points.count) points · \(value.playbackDuration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
         case let .bezier(value): "Bézier · \(value.segmentCount) segment\(value.segmentCount == 1 ? "" : "s") · \(value.duration.formatted()) s\(value.loopStart == nil ? "" : " · loops")"
         }
     }
@@ -281,7 +281,7 @@ private struct PathCanvas: View {
             guard value.points.count >= 2 else { return value.points.enumerated().map { (Double($0.offset), $0.element) } }
             let count = 80
             return (0...count).map { index in
-                let elapsed = value.duration * Double(index) / Double(count)
+                let elapsed = value.playbackDuration * Double(index) / Double(count)
                 return (elapsed, normalizedPosition(elapsed: elapsed))
             }
         case let .bezier(value):
@@ -302,7 +302,7 @@ private struct PathCanvas: View {
     private var labelledSamples: [(label: String, point: MovementPathPointDefinition)] {
         let duration: Double
         switch pathDefinition {
-        case let .waypoints(value): duration = max(0, value.duration)
+        case let .waypoints(value): duration = max(0, value.playbackDuration)
         case let .bezier(value): duration = max(0, value.duration)
         case .straight, .sine: duration = 5
         }
@@ -385,7 +385,7 @@ struct PathInspector: View {
                 number("Frequency (Hz)", sineBinding(\.frequency, fallback: value.frequency))
                 number("Member phase (rad)", sineBinding(\.phaseOffset, fallback: value.phaseOffset))
             case let .waypoints(value):
-                number("Duration (s)", waypointBinding(\.duration, fallback: value.duration))
+                number("Travel duration (s)", waypointBinding(\.duration, fallback: value.duration))
                 Toggle("Loop after completion", isOn: waypointLoopBinding)
                 if value.loopToPoint != nil {
                     Picker("Loop to waypoint", selection: waypointLoopToBinding) {
@@ -395,7 +395,7 @@ struct PathInspector: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 LabeledContent("Segments", value: "\(max(0, value.points.count - 1))")
-                Text("Segments currently share the duration equally.")
+                Text("Segments share travel time equally; waypoint stays add to the total playback time.")
                     .font(.caption).foregroundStyle(.secondary)
             case let .bezier(value):
                 number("Duration (s)", bezierBinding(\.duration, fallback: value.duration))
@@ -417,6 +417,7 @@ struct PathInspector: View {
                 DisclosureGroup(isExpanded: pointExpanded(index)) {
                     number("X (normalized)", pointBinding(index, \.x, fallback: point.x))
                     number("Y (normalized)", pointBinding(index, \.y, fallback: point.y))
+                    number("Stay duration (s)", pointBinding(index, \.stayDuration, fallback: point.stayDuration))
                     HStack {
                         Button("Move Up") { movePoint(index, by: -1) }.disabled(index == 0)
                         Button("Move Down") { movePoint(index, by: 1) }.disabled(index == value.points.count - 1)
@@ -424,7 +425,7 @@ struct PathInspector: View {
                     Button("Remove Waypoint", role: .destructive) { removePoint(index) }
                         .disabled(value.points.count <= 2)
                 } label: {
-                    Text("Point \(index + 1)  (\(point.x.formatted()), \(point.y.formatted()))")
+                    Text("Point \(index + 1)  (\(point.x.formatted()), \(point.y.formatted()))\(point.stayDuration > 0 ? " · stay \(point.stayDuration.formatted()) s" : "")")
                 }
             }
             Button("Add Waypoint", action: addPoint)

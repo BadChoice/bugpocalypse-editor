@@ -920,6 +920,17 @@ final class EditorWorkspace: ObservableObject {
                     add(.error, "mission.drop.invalid", "Event \(index + 1): \(diagnostic.message)", path + ["drops", "\(diagnostic.memberIndex)"])
                 }
             }
+            if case let .spawnBoss(boss) = event.action {
+                if boss.id != "boss1" {
+                    add(.error, "mission.boss.unknown", "Event \(index + 1) uses unknown boss '\(boss.id)'.", path + ["id"])
+                }
+                if boss.level < 1 {
+                    add(.error, "mission.boss.level", "Boss level must be at least 1.", path + ["level"])
+                }
+                if !boss.y.isFinite {
+                    add(.error, "mission.boss.y", "Boss spawn height must be finite.", path + ["y"])
+                }
+            }
         }
         return result
     }
@@ -1028,15 +1039,20 @@ final class EditorWorkspace: ObservableObject {
             }
         case let .waypoints(value):
             positive(value.duration, "duration")
-            validLoopStart(value.loopStart, duration: value.duration)
+            validLoopStart(value.loopStart, duration: value.playbackDuration)
             if let loopToPoint = value.loopToPoint, !value.points.indices.contains(loopToPoint) {
                 add("path.loopToPoint.invalid", "Loop waypoint must be one of this path's waypoints.", ["path", "loopToPoint"])
             }
             if value.points.count < 2 {
                 add("path.points.count", "A waypoint path needs at least two points.", ["path", "points"])
             }
-            for (index, point) in value.points.enumerated() where !point.x.isFinite || !point.y.isFinite {
-                add("path.point.invalid", "Waypoint \(index + 1) needs finite coordinates.", ["path", "points", "\(index)"])
+            for (index, point) in value.points.enumerated() {
+                if !point.x.isFinite || !point.y.isFinite {
+                    add("path.point.invalid", "Waypoint \(index + 1) needs finite coordinates.", ["path", "points", "\(index)"])
+                }
+                if !point.stayDuration.isFinite || point.stayDuration < 0 {
+                    add("path.point.stay.invalid", "Waypoint \(index + 1) needs a finite, non-negative stay duration.", ["path", "points", "\(index)", "stayDuration"])
+                }
             }
         case let .bezier(value):
             positive(value.duration, "duration")

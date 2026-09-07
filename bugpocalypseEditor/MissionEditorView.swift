@@ -61,6 +61,9 @@ struct MissionEditorView: View {
                 Button("Spawn Formation") {
                     workspace.addMissionEvent(.spawnFormation(Self.defaultSpawn))
                 }
+                Button("Spawn Boss") {
+                    workspace.addMissionEvent(.spawnBoss(Self.defaultBossSpawn))
+                }
                 Button("Zoom Out") {
                     workspace.addMissionEvent(.zoomOut(.init(multiplier: 0.8, duration: 1.0)))
                 }
@@ -158,6 +161,7 @@ struct MissionEditorView: View {
         path: .straight(.init(speed: 120)),
         spawnPosition: .init(edge: .right, xOffset: 24, y: 180)
     )
+    private static let defaultBossSpawn = SpawnBossEvent(id: "boss1", level: 1, y: 180)
 }
 
 private struct TimelineEventCard: View {
@@ -169,12 +173,21 @@ private struct TimelineEventCard: View {
             HStack {
                 Image(systemName: icon).foregroundStyle(color)
                 Text(title).font(.caption.bold()).lineLimit(1)
-                if case let .spawnFormation(value) = event.action {
+                switch event.action {
+                case let .spawnFormation(value):
                     Text("Lv \(value.enemy.level)")
                         .font(.system(.caption2, design: .rounded).bold())
                         .padding(.horizontal, 5).padding(.vertical, 2)
                         .foregroundStyle(.white)
                         .background(color, in: Capsule())
+                case let .spawnBoss(value):
+                    Text("Lv \(value.level)")
+                        .font(.system(.caption2, design: .rounded).bold())
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .foregroundStyle(.white)
+                        .background(color, in: Capsule())
+                default:
+                    EmptyView()
                 }
             }
             Text(String(format: "%.2f s", event.at))
@@ -191,6 +204,7 @@ private struct TimelineEventCard: View {
     private var title: String {
         switch event.action {
         case let .spawnFormation(value): EnemyCatalogue.entry(for: value.enemy.id)?.displayName ?? value.enemy.id
+        case let .spawnBoss(value): "Boss: \(value.id)"
         case .zoomOut: "Zoom Out"
         case .zoomIn: "Zoom In"
         }
@@ -205,12 +219,25 @@ private struct TimelineEventCard: View {
                 ].compactMap { $0 }.joined(separator: " · ")
             }
             return "\(value.formation.offsets().count) × \(value.formation.kind.rawValue)"
+        case let .spawnBoss(value): return "Enters at y \(Int(value.y))"
         case let .zoomOut(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
         case let .zoomIn(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
         }
     }
-    private var icon: String { if case .spawnFormation = event.action { "ant.fill" } else { "camera.fill" } }
-    private var color: Color { if case .spawnFormation = event.action { .orange } else { .blue } }
+    private var icon: String {
+        switch event.action {
+        case .spawnFormation: "ant.fill"
+        case .spawnBoss: "crown.fill"
+        case .zoomOut, .zoomIn: "camera.fill"
+        }
+    }
+    private var color: Color {
+        switch event.action {
+        case .spawnFormation: .orange
+        case .spawnBoss: .red
+        case .zoomOut, .zoomIn: .blue
+        }
+    }
 }
 
 private struct MissionPreview: View {
@@ -233,6 +260,9 @@ private struct MissionPreview: View {
                 ForEach(Array(mission.timeline.enumerated()), id: \.offset) { index, event in
                     if case let .spawnFormation(spawn) = event.action, event.at <= playhead {
                         formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, selectedMember: selectedEventIndex == index ? selectedMemberIndex : nil, origin: origin, scale: scale)
+                    }
+                    if case let .spawnBoss(spawn) = event.action, event.at <= playhead {
+                        boss(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
                     }
                 }
                 Text("640 × 360  •  t = \(playhead, specifier: "%.2f") s")
@@ -307,6 +337,39 @@ private struct MissionPreview: View {
                 .padding(5).background(.black.opacity(0.8), in: Capsule())
                 .position(x: origin.x + 580 * scale, y: origin.y + 20 * scale)
         }
+    }
+
+    /// Mirrors `BossEnemy`'s authored components and entrance: it starts 145
+    /// pixels beyond the right edge, then stops at x = 510.
+    @ViewBuilder
+    private func boss(_ spawn: SpawnBossEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
+        let entryX = max(640 + 145 - 110 * elapsed, 510.0)
+        let position = CGPoint(x: origin.x + entryX * scale, y: origin.y + spawn.y * scale)
+        let bossSize = CGSize(width: 330, height: 250)
+        ZStack {
+            BossComponentSprite(url: workspace.assetURL(for: "enemies/boss1/body.png"), name: spawn.id)
+                .frame(width: 246 * scale, height: 224 * scale)
+            BossComponentSprite(url: workspace.assetURL(for: "enemies/boss1/weapon.png"), name: spawn.id)
+                .frame(width: 217 * scale, height: 113 * scale)
+                .offset(x: -58 * scale, y: 49 * scale)
+            BossComponentSprite(url: workspace.assetURL(for: "enemies/boss1/weapon.png"), name: spawn.id, flipVertically: true)
+                .frame(width: 217 * scale, height: 113 * scale)
+                .offset(x: 52 * scale, y: 43 * scale)
+            BossComponentSprite(url: workspace.assetURL(for: "enemies/boss1/head.png"), name: spawn.id)
+                .frame(width: 149 * scale, height: 75 * scale)
+                .offset(x: -3 * scale, y: -54 * scale)
+            Text("Lv \(spawn.level)")
+                .font(.system(size: max(7, 9 * scale), weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, max(3, 4 * scale)).padding(.vertical, max(1, 2 * scale))
+                .background(.black.opacity(0.78), in: Capsule())
+                .offset(y: -max(14, bossSize.height * scale / 2 + 8 * scale))
+        }
+        .frame(width: bossSize.width * scale, height: bossSize.height * scale)
+        .background(selected ? Color.accentColor.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 8))
+        .position(position)
+        .contentShape(Rectangle())
+        .onTapGesture { selectEvent(eventIndex, eventTime) }
     }
 
     /// Runtime sprites use their atlas dimensions without a common size
@@ -392,6 +455,25 @@ private struct EnemyPreviewSprite: View {
     }
 }
 
+private struct BossComponentSprite: View {
+    let url: URL?
+    let name: String
+    var flipVertically = false
+
+    var body: some View {
+        Group {
+            if let url, let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().interpolation(.none).scaledToFit()
+                    .scaleEffect(x: 1, y: flipVertically ? -1 : 1)
+            } else {
+                Rectangle().fill(.red.opacity(0.7)).overlay {
+                    Text(String(name.prefix(1)).uppercased()).font(.caption.bold()).foregroundStyle(.white)
+                }
+            }
+        }
+    }
+}
+
 struct MissionInspector: View {
     @ObservedObject var workspace: EditorWorkspace
 
@@ -469,12 +551,14 @@ struct MissionInspector: View {
                 TextField("Time (seconds)", value: eventTimeBinding, format: .number.precision(.fractionLength(2)))
                 Picker("Type", selection: eventTypeBinding) {
                     Text("Spawn Formation").tag(EventEditorKind.spawnFormation)
+                    Text("Spawn Boss").tag(EventEditorKind.spawnBoss)
                     Text("Zoom Out").tag(EventEditorKind.zoomOut)
                     Text("Zoom In").tag(EventEditorKind.zoomIn)
                 }
             }
             switch event.action {
             case let .spawnFormation(spawn): spawnFields(spawn)
+            case let .spawnBoss(spawn): bossFields(spawn)
             case let .zoomOut(zoom): zoomFields(zoom)
             case let .zoomIn(zoom): zoomFields(zoom)
             }
@@ -482,6 +566,20 @@ struct MissionInspector: View {
                 Button("Duplicate Event") { workspace.duplicateSelectedMissionEvent() }
                 Button("Delete Event", role: .destructive) { workspace.deleteSelectedMissionEvent() }
             }
+        }
+    }
+
+    @ViewBuilder private func bossFields(_ spawn: SpawnBossEvent) -> some View {
+        Section("Boss") {
+            Picker("Type", selection: bossBinding(\.id, fallback: spawn.id)) {
+                Text("Boss 1").tag("boss1")
+            }
+            Stepper("Level: \(spawn.level)", value: bossBinding(\.level, fallback: spawn.level), in: 1...100)
+        }
+        Section("Spawn") {
+            TextField("Y", value: bossBinding(\.y, fallback: spawn.y), format: .number)
+            Text("The preview shows the runtime entrance and final x position.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -658,12 +756,13 @@ struct MissionInspector: View {
         }
     }
 
-    private enum EventEditorKind: Hashable { case spawnFormation, zoomOut, zoomIn }
+    private enum EventEditorKind: Hashable { case spawnFormation, spawnBoss, zoomOut, zoomIn }
     private enum EncounterSource: Hashable { case inline, saved }
     private var eventTypeBinding: Binding<EventEditorKind> {
         Binding(get: {
             switch selectedEvent?.action {
             case .spawnFormation: .spawnFormation
+            case .spawnBoss: .spawnBoss
             case .zoomOut: .zoomOut
             case .zoomIn: .zoomIn
             case nil: .spawnFormation
@@ -672,6 +771,7 @@ struct MissionInspector: View {
             workspace.updateSelectedMissionEvent { event in
                 switch kind {
                 case .spawnFormation: event.action = .spawnFormation(.init(enemy: .init(id: "fly_basic", level: 1), formation: .line(.init(axis: .vertical, count: 3, spacing: 48)), path: .straight(.init(speed: 120)), spawnPosition: .init(edge: .right, xOffset: 24, y: 180)))
+                case .spawnBoss: event.action = .spawnBoss(.init(id: "boss1", level: 1, y: 180))
                 case .zoomOut: event.action = .zoomOut(.init(multiplier: 0.8, duration: 1))
                 case .zoomIn: event.action = .zoomIn(.init(multiplier: 1, duration: 1))
                 }
@@ -705,6 +805,24 @@ struct MissionInspector: View {
         )
     }
     private func mutateSpawn(_ change: (inout SpawnFormationEvent) -> Void) { workspace.updateSelectedMissionEvent { event in guard case var .spawnFormation(value) = event.action else { return }; change(&value); event.action = .spawnFormation(value) } }
+    private func bossBinding<Value>(
+        _ keyPath: WritableKeyPath<SpawnBossEvent, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
+        Binding(
+            get: {
+                guard case let .spawnBoss(value)? = selectedEvent?.action else { return fallback }
+                return value[keyPath: keyPath]
+            },
+            set: { value in
+                workspace.updateSelectedMissionEvent { event in
+                    guard case var .spawnBoss(boss) = event.action else { return }
+                    boss[keyPath: keyPath] = value
+                    event.action = .spawnBoss(boss)
+                }
+            }
+        )
+    }
 
     private var resolvedFormationMemberCount: Int {
         guard case let .spawnFormation(spawn)? = selectedEvent?.action else { return 0 }
