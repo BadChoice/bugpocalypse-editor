@@ -343,8 +343,8 @@ private struct MissionPreview: View {
     /// pixels beyond the right edge, then stops at x = 510.
     @ViewBuilder
     private func boss(_ spawn: SpawnBossEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, origin: CGPoint, scale: CGFloat) -> some View {
-        let entryX = max(640 + 145 - 110 * elapsed, 510.0)
-        let position = CGPoint(x: origin.x + entryX * scale, y: origin.y + spawn.y * scale)
+        let routePosition = bossPosition(for: spawn, elapsed: elapsed)
+        let position = CGPoint(x: origin.x + routePosition.x * scale, y: origin.y + routePosition.y * scale)
         let bossSize = CGSize(width: 330, height: 250)
         ZStack {
             BossComponentSprite(url: workspace.assetURL(for: "enemies/boss1/body.png"), name: spawn.id)
@@ -370,6 +370,19 @@ private struct MissionPreview: View {
         .position(position)
         .contentShape(Rectangle())
         .onTapGesture { selectEvent(eventIndex, eventTime) }
+    }
+
+    private func bossPosition(for spawn: SpawnBossEvent, elapsed: Double) -> ContentPoint {
+        guard let path = spawn.path else {
+            return .init(x: max(640 + 145 - 110 * elapsed, 510.0), y: spawn.y)
+        }
+        switch path {
+        case .straight, .sine:
+            let offset = path.offset(elapsed: elapsed)
+            return .init(x: 640 + 145 + offset.x, y: spawn.y + offset.y)
+        case .waypoints, .bezier:
+            return sampledPath(path, elapsed: elapsed)
+        }
     }
 
     /// Runtime sprites use their atlas dimensions without a common size
@@ -578,8 +591,48 @@ struct MissionInspector: View {
         }
         Section("Spawn") {
             TextField("Y", value: bossBinding(\.y, fallback: spawn.y), format: .number)
-            Text("The preview shows the runtime entrance and final x position.")
+            Text("Without a path, the preview shows the runtime entrance and final x position.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Movement Path") {
+            Toggle("Use authored path", isOn: bossHasPathBinding)
+            if let path = spawn.path {
+                Picker("Kind", selection: bossPathKindBinding) {
+                    ForEach(MovementPathKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+                }
+                bossPathFields(path)
+            }
+        }
+    }
+
+    @ViewBuilder private func bossPathFields(_ path: MovementPathDefinition) -> some View {
+        switch path {
+        case let .straight(value):
+            TextField("Speed (px/s)", value: bossStraightBinding(\.speed, fallback: value.speed), format: .number)
+        case let .sine(value):
+            TextField("Speed (px/s)", value: bossSineBinding(\.speed, fallback: value.speed), format: .number)
+            TextField("Amplitude (px)", value: bossSineBinding(\.amplitude, fallback: value.amplitude), format: .number)
+            TextField("Frequency (Hz)", value: bossSineBinding(\.frequency, fallback: value.frequency), format: .number)
+        case let .waypoints(value):
+            TextField("Travel duration (seconds)", value: bossWaypointBinding(\.duration, fallback: value.duration), format: .number)
+            Toggle("Loop after completion", isOn: bossWaypointLoopBinding)
+            if value.loopToPoint != nil {
+                Picker("Loop to waypoint", selection: bossWaypointLoopToBinding) {
+                    ForEach(value.points.indices, id: \.self) { Text("Point \($0 + 1)").tag($0) }
+                }
+            }
+            ForEach(Array(value.points.enumerated()), id: \.offset) { index, point in
+                LabeledContent("Point \(index + 1)") {
+                    HStack {
+                        TextField("X", value: bossWaypointPointBinding(index, \.x, fallback: point.x), format: .number)
+                        TextField("Y", value: bossWaypointPointBinding(index, \.y, fallback: point.y), format: .number)
+                        TextField("Stay", value: bossWaypointPointBinding(index, \.stayDuration, fallback: point.stayDuration), format: .number)
+                    }
+                }
+            }
+        case let .bezier(value):
+            TextField("Duration (seconds)", value: bossBezierBinding(\.duration, fallback: value.duration), format: .number)
+            Text("Use this for a custom curved entrance or loop.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -823,6 +876,73 @@ struct MissionInspector: View {
             }
         )
     }
+    private var bossHasPathBinding: Binding<Bool> {
+        Binding(get: {
+            guard case let .spawnBoss(boss)? = selectedEvent?.action else { return false }
+            return boss.path != nil
+        }, set: { enabled in
+            workspace.updateSelectedMissionEvent { event in
+                guard case var .spawnBoss(boss) = event.action else { return }
+                boss.path = enabled ? Self.defaultBossPath : nil
+                event.action = .spawnBoss(boss)
+            }
+        })
+    }
+    private var bossPathKindBinding: Binding<MovementPathKind> {
+        Binding(get: {
+            guard case let .spawnBoss(boss)? = selectedEvent?.action else { return .waypoints }
+            return boss.path?.kind ?? .waypoints
+        }, set: { kind in mutateBossPath { $0 = defaultPath(kind) } })
+    }
+    private func mutateBossPath(_ change: (inout MovementPathDefinition) -> Void) {
+        workspace.updateSelectedMissionEvent { event in
+            guard case var .spawnBoss(boss) = event.action, var path = boss.path else { return }
+            change(&path)
+            boss.path = path
+            event.action = .spawnBoss(boss)
+        }
+    }
+    private func bossPathBinding<Value, Payload>(_ extract: @escaping (MovementPathDefinition) -> Payload?, _ wrap: @escaping (Payload) -> MovementPathDefinition, _ keyPath: WritableKeyPath<Payload, Value>, fallback: Value) -> Binding<Value> {
+        Binding(get: {
+            guard case let .spawnBoss(boss)? = selectedEvent?.action, let path = boss.path, let value = extract(path) else { return fallback }
+            return value[keyPath: keyPath]
+        }, set: { newValue in
+            mutateBossPath { path in
+                guard var value = extract(path) else { return }
+                value[keyPath: keyPath] = newValue
+                path = wrap(value)
+            }
+        })
+    }
+    private func bossStraightBinding<Value>(_ keyPath: WritableKeyPath<StraightPath, Value>, fallback: Value) -> Binding<Value> { bossPathBinding({ if case let .straight(value) = $0 { value } else { nil } }, MovementPathDefinition.straight, keyPath, fallback: fallback) }
+    private func bossSineBinding<Value>(_ keyPath: WritableKeyPath<SinePath, Value>, fallback: Value) -> Binding<Value> { bossPathBinding({ if case let .sine(value) = $0 { value } else { nil } }, MovementPathDefinition.sine, keyPath, fallback: fallback) }
+    private func bossWaypointBinding<Value>(_ keyPath: WritableKeyPath<WaypointPath, Value>, fallback: Value) -> Binding<Value> { bossPathBinding({ if case let .waypoints(value) = $0 { value } else { nil } }, MovementPathDefinition.waypoints, keyPath, fallback: fallback) }
+    private func bossBezierBinding<Value>(_ keyPath: WritableKeyPath<BezierPath, Value>, fallback: Value) -> Binding<Value> { bossPathBinding({ if case let .bezier(value) = $0 { value } else { nil } }, MovementPathDefinition.bezier, keyPath, fallback: fallback) }
+    private var bossWaypointLoopBinding: Binding<Bool> {
+        Binding(get: { if case let .spawnBoss(boss)? = selectedEvent?.action, case let .waypoints(path)? = boss.path { path.loopToPoint != nil } else { false } }, set: { enabled in
+            mutateBossPath { path in guard case var .waypoints(value) = path else { return }; value.loopToPoint = enabled ? (value.loopToPoint ?? 1) : nil; path = .waypoints(value) }
+        })
+    }
+    private var bossWaypointLoopToBinding: Binding<Int> {
+        Binding(get: { if case let .spawnBoss(boss)? = selectedEvent?.action, case let .waypoints(path)? = boss.path { path.loopToPoint ?? 0 } else { 0 } }, set: { index in
+            mutateBossPath { path in guard case var .waypoints(value) = path else { return }; value.loopToPoint = index; path = .waypoints(value) }
+        })
+    }
+    private func bossWaypointPointBinding(_ index: Int, _ keyPath: WritableKeyPath<MovementPathPointDefinition, Double>, fallback: Double) -> Binding<Double> {
+        Binding(get: {
+            guard case let .spawnBoss(boss)? = selectedEvent?.action,
+                  case let .waypoints(path)? = boss.path,
+                  path.points.indices.contains(index) else { return fallback }
+            return path.points[index][keyPath: keyPath]
+        }, set: { value in
+            mutateBossPath { path in
+                guard case var .waypoints(waypoints) = path,
+                      waypoints.points.indices.contains(index) else { return }
+                waypoints.points[index][keyPath: keyPath] = value
+                path = .waypoints(waypoints)
+            }
+        })
+    }
 
     private var resolvedFormationMemberCount: Int {
         guard case let .spawnFormation(spawn)? = selectedEvent?.action else { return 0 }
@@ -910,6 +1030,7 @@ struct MissionInspector: View {
     private var zoomMultiplierBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.multiplier; case let .zoomIn(v): v.multiplier; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.multiplier = value; event.action = .zoomOut(v); case var .zoomIn(v): v.multiplier = value; event.action = .zoomIn(v); default: break } } }) }
     private var zoomDurationBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.duration; case let .zoomIn(v): v.duration; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.duration = max(0, value); event.action = .zoomOut(v); case var .zoomIn(v): v.duration = max(0, value); event.action = .zoomIn(v); default: break } } }) }
 
+    private static let defaultBossPath = MovementPathDefinition.waypoints(.init(duration: 8, points: [.init(x: 1.2, y: 0.5), .init(x: 0.72, y: 0.25), .init(x: 0.58, y: 0.72), .init(x: 0.72, y: 0.5)], loopToPoint: 1))
     private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
     private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
