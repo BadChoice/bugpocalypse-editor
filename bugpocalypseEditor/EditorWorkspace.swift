@@ -152,6 +152,7 @@ final class EditorWorkspace: ObservableObject {
     private let fileManager = FileManager.default
     private let rememberedRootKey = "BugpocalypseEditor.projectRoot"
     private let rememberedRootBookmarkKey = "BugpocalypseEditor.projectRootBookmark"
+    private var enemyPreviewCache: [String: NSImage] = [:]
 
     var selectedWorld: WorldDocument? {
         guard case .world(let url) = selection else { return nil }
@@ -915,6 +916,45 @@ final class EditorWorkspace: ObservableObject {
     func enemyAssetURL(for enemyID: String) -> URL? {
         guard let entry = EnemyCatalogue.entry(for: enemyID) else { return nil }
         return assetURL(for: entry.previewAssetName + ".png")
+    }
+
+    /// Enemy art is packed into `textures.1.png` for the game. The editor
+    /// reads the same atlas rather than substituting a generic icon, which
+    /// keeps the preview's visual scale faithful to runtime.
+    func enemyPreviewImage(for enemyID: String) -> NSImage? {
+        if let image = enemyPreviewCache[enemyID] { return image }
+        guard let entry = EnemyCatalogue.entry(for: enemyID),
+              let projectRoot,
+              let image = atlasImage(named: entry.previewAssetName + ".png", projectRoot: projectRoot) else {
+            return enemyAssetURL(for: enemyID).flatMap(NSImage.init(contentsOf:))
+        }
+        enemyPreviewCache[enemyID] = image
+        return image
+    }
+
+    private func atlasImage(named name: String, projectRoot: URL) -> NSImage? {
+        let atlasDirectory = projectRoot.appendingPathComponent("assets/textures", isDirectory: true)
+        let plistURL = atlasDirectory.appendingPathComponent("textures.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dictionary = plist as? [String: Any],
+              let images = dictionary["images"] as? [[String: Any]],
+              let atlas = images.first(where: { image in
+                  (image["subimages"] as? [[String: Any]])?.contains { $0["name"] as? String == name } == true
+              }),
+              let subimage = (atlas["subimages"] as? [[String: Any]])?.first(where: { $0["name"] as? String == name }),
+              let rectText = subimage["textureRect"] as? String,
+              let atlasName = atlas["path"] as? String,
+              let atlasImage = NSImage(contentsOf: atlasDirectory.appendingPathComponent(atlasName)),
+              let cgImage = atlasImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+
+        let values = rectText.split { !( $0.isNumber || $0 == "-" || $0 == "." ) }.compactMap { token in
+            Double(String(token)).map { CGFloat($0) }
+        }
+        guard values.count == 4 else { return nil }
+        let rect = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
+        guard let cropped = cgImage.cropping(to: rect) else { return nil }
+        return NSImage(cgImage: cropped, size: rect.size)
     }
 
     /// Tile resources the world editor can author. Paths stay relative to the

@@ -22,7 +22,7 @@ struct MissionEditorView: View {
                     playhead: playhead,
                     selectedEventIndex: workspace.selectedMissionEventIndex,
                     selectedMemberIndex: workspace.selectedFormationMemberIndex,
-                    enemyAssetURL: workspace.enemyAssetURL,
+                    enemyPreviewImage: workspace.enemyPreviewImage,
                     selectEvent: selectTimelineEvent,
                     selectMember: selectFormationMember
                 )
@@ -268,7 +268,7 @@ struct MissionPreview: View {
     let playhead: Double
     let selectedEventIndex: Int?
     let selectedMemberIndex: Int?
-    let enemyAssetURL: (String) -> URL?
+    let enemyPreviewImage: (String) -> NSImage?
     let selectEvent: (Int, Double) -> Void
     let selectMember: (Int, Int, Double) -> Void
 
@@ -354,8 +354,9 @@ struct MissionPreview: View {
                 x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x) * scale,
                 y: origin.y + (transformedY + (spawn.pathTransform?.yOffset ?? 0)) * scale
             )
-            let spriteSize = enemyPreviewSize(for: spawn.enemy.id)
-            EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected && selectedMember == index)
+            let image = enemyPreviewImage(spawn.enemy.id)
+            let spriteSize = enemyPreviewSize(image: image)
+            EnemyPreviewSprite(image: image, name: spawn.enemy.id, selected: selected && selectedMember == index)
                 .frame(width: spriteSize.width * scale, height: spriteSize.height * scale)
                 .overlay(alignment: .top) {
                     Text("Lv \(spawn.enemy.level)")
@@ -438,8 +439,8 @@ struct MissionPreview: View {
     /// Runtime sprites use their atlas dimensions without a common size
     /// normalization. Preserve those dimensions in the editor so bosses and
     /// heavy enemies read at their intended scale.
-    private func enemyPreviewSize(for enemyID: String) -> CGSize {
-        guard let url = enemyAssetURL(enemyID), let image = NSImage(contentsOf: url) else {
+    private func enemyPreviewSize(image: NSImage?) -> CGSize {
+        guard let image else {
             return CGSize(width: 42, height: 42)
         }
         return CGSize(width: max(1, image.size.width), height: max(1, image.size.height))
@@ -498,13 +499,13 @@ private extension MovementPathDefinition {
 }
 
 private struct EnemyPreviewSprite: View {
-    let url: URL?
+    let image: NSImage?
     let name: String
     let selected: Bool
 
     var body: some View {
         Group {
-            if let url, let image = NSImage(contentsOf: url) {
+            if let image {
                 Image(nsImage: image).resizable().interpolation(.none).scaledToFit()
             } else {
                 ZStack {

@@ -32,7 +32,7 @@ struct ChoreographyEditorView: View {
                     playhead: playhead,
                     selectedEventIndex: workspace.selectedChoreographyEventIndex,
                     selectedMemberIndex: nil,
-                    enemyAssetURL: workspace.enemyAssetURL,
+                    enemyPreviewImage: workspace.enemyPreviewImage,
                     selectEvent: selectTimelineEvent,
                     selectMember: { _, index, at in selectTimelineEvent(index, at) }
                 )
