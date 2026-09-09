@@ -994,12 +994,6 @@ final class EditorWorkspace: ObservableObject {
         return image
     }
 
-    /// The Ship Fly's artwork has a low, wide silhouette. A modest editor-only
-    /// boost makes its visual weight legible at the timeline preview's zoom.
-    func enemyPreviewVisualScale(for enemyID: String) -> CGFloat {
-        enemyID == "ship_fly" ? 1.35 : 1
-    }
-
     private func atlasImage(named name: String, projectRoot: URL) -> NSImage? {
         let atlasDirectory = projectRoot.appendingPathComponent("assets/textures", isDirectory: true)
         let plistURL = atlasDirectory.appendingPathComponent("textures.plist")

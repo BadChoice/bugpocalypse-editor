@@ -363,8 +363,7 @@ struct MissionPreview: View {
             )
             let image = enemyPreviewImage(spawn.enemy.id)
             let spriteSize = enemyPreviewSize(image: image)
-            let visualScale = enemyPreviewVisualScale(spawn.enemy.id)
-            let previewSize = CGSize(width: spriteSize.width * visualScale, height: spriteSize.height * visualScale)
+            let previewSize = spriteSize
             EnemyPreviewSprite(image: image, name: spawn.enemy.id, selected: selected && selectedMember == index)
                 .frame(width: previewSize.width * scale, height: previewSize.height * scale)
                 .overlay(alignment: .top) {
