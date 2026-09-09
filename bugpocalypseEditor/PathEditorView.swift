@@ -341,13 +341,15 @@ struct PathInspector: View {
 
     var body: some View {
         Group {
-            if let document = workspace.selectedPath?.definition {
+            if let editorDocument = workspace.selectedPath {
+                let document = editorDocument.definition
                 Form {
                     identity(document)
                     parameters(document.path)
                     if case let .waypoints(value) = document.path { waypoints(value) }
                     if case let .bezier(value) = document.path { bezierControls(value) }
                     diagnostics
+                    ContentUsageSection(usages: workspace.usages(ofPath: editorDocument), open: workspace.open)
                     Section("Actions") {
                         Button("Duplicate and Edit", action: workspace.duplicateSelectedPath)
                     }

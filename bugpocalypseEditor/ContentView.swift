@@ -122,6 +122,46 @@ struct ContentView: View {
     }
 }
 
+struct ContentUsageSection: View {
+    let usages: [ContentUsage]
+    let open: (ContentUsage) -> Void
+
+    var body: some View {
+        Section("Used By") {
+            if usages.isEmpty {
+                Text("Not used by any loaded mission or choreography.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(usages) { usage in
+                    Button { open(usage) } label: {
+                        HStack {
+                            Image(systemName: icon(for: usage))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(usage.label)
+                                Text(String(format: "%.2f s", usage.at))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func icon(for usage: ContentUsage) -> String {
+        switch usage.location {
+        case .mission: "flag.checkered"
+        case .choreography: "square.stack.3d.up.fill"
+        }
+    }
+}
+
 private struct ChoreographyWelcomeView: View {
     @ObservedObject var workspace: EditorWorkspace
     var body: some View {

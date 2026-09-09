@@ -33,6 +33,7 @@ struct ChoreographyEditorView: View {
                     selectedEventIndex: workspace.selectedChoreographyEventIndex,
                     selectedMemberIndex: nil,
                     enemyPreviewImage: workspace.enemyPreviewImage,
+                    enemyPreviewVisualScale: workspace.enemyPreviewVisualScale,
                     selectEvent: selectTimelineEvent,
                     selectMember: { _, index, at in selectTimelineEvent(index, at) }
                 )
@@ -52,6 +53,11 @@ struct ChoreographyEditorView: View {
             guard isPlaying else { return }
             playhead += (1.0 / 30.0) * playbackSpeed
             if playhead >= choreographyDuration { playhead = 0 }
+        }
+        .onChange(of: workspace.selectedChoreographyEventIndex) { _, index in
+            guard let index, document.definition.timeline.indices.contains(index) else { return }
+            playhead = min(document.definition.timeline[index].at + 2, choreographyDuration)
+            isPlaying = false
         }
     }
 
@@ -152,6 +158,7 @@ struct ChoreographyInspector: View {
             if let document {
                 documentFields(document)
                 if let event = selectedEvent { eventFields(event) }
+                ContentUsageSection(usages: workspace.usages(ofChoreography: document), open: workspace.open)
             } else { ContentUnavailableView("No choreography selected", systemImage: "sidebar.right") }
         }
         .formStyle(.grouped)
@@ -207,7 +214,10 @@ struct ChoreographyInspector: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         dropsFields(event)
-        Section { Button("Delete Formation", role: .destructive) { workspace.deleteSelectedChoreographyEvent() } }
+        Section("Actions") {
+            Button("Duplicate Spawn", action: workspace.duplicateSelectedChoreographySpawn)
+            Button("Delete Formation", role: .destructive) { workspace.deleteSelectedChoreographyEvent() }
+        }
     }
 
     @ViewBuilder private func dropsFields(_ event: ChoreographyTimelineEvent) -> some View {

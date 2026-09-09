@@ -165,12 +165,14 @@ struct FormationInspector: View {
 
     var body: some View {
         Group {
-            if let document = workspace.selectedFormation?.definition {
+            if let editorDocument = workspace.selectedFormation {
+                let document = editorDocument.definition
                 Form {
                     identity(document)
                     geometry(document.formation)
                     if case let .freeform(value) = document.formation { members(value) }
                     diagnostics
+                    ContentUsageSection(usages: workspace.usages(ofFormation: editorDocument), open: workspace.open)
                     Section("Actions") {
                         Button("Duplicate and Edit", action: workspace.duplicateSelectedFormation)
                     }

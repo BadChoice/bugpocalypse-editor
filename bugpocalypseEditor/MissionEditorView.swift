@@ -23,6 +23,7 @@ struct MissionEditorView: View {
                     selectedEventIndex: workspace.selectedMissionEventIndex,
                     selectedMemberIndex: workspace.selectedFormationMemberIndex,
                     enemyPreviewImage: workspace.enemyPreviewImage,
+                    enemyPreviewVisualScale: workspace.enemyPreviewVisualScale,
                     selectEvent: selectTimelineEvent,
                     selectMember: selectFormationMember
                 )
@@ -42,6 +43,11 @@ struct MissionEditorView: View {
             guard isPlaying else { return }
             playhead += (1.0 / 30.0) * playbackSpeed
             if playhead >= missionDuration { playhead = 0 }
+        }
+        .onChange(of: workspace.selectedMissionEventIndex) { _, index in
+            guard let index, document.definition.timeline.indices.contains(index) else { return }
+            playhead = min(document.definition.timeline[index].at + 2, missionDuration)
+            isPlaying = false
         }
     }
 
@@ -269,6 +275,7 @@ struct MissionPreview: View {
     let selectedEventIndex: Int?
     let selectedMemberIndex: Int?
     let enemyPreviewImage: (String) -> NSImage?
+    let enemyPreviewVisualScale: (String) -> CGFloat
     let selectEvent: (Int, Double) -> Void
     let selectMember: (Int, Int, Double) -> Void
 
@@ -356,8 +363,10 @@ struct MissionPreview: View {
             )
             let image = enemyPreviewImage(spawn.enemy.id)
             let spriteSize = enemyPreviewSize(image: image)
+            let visualScale = enemyPreviewVisualScale(spawn.enemy.id)
+            let previewSize = CGSize(width: spriteSize.width * visualScale, height: spriteSize.height * visualScale)
             EnemyPreviewSprite(image: image, name: spawn.enemy.id, selected: selected && selectedMember == index)
-                .frame(width: spriteSize.width * scale, height: spriteSize.height * scale)
+                .frame(width: previewSize.width * scale, height: previewSize.height * scale)
                 .overlay(alignment: .top) {
                     Text("Lv \(spawn.enemy.level)")
                         .font(.system(size: max(7, 9 * scale), weight: .bold, design: .rounded))
@@ -365,7 +374,7 @@ struct MissionPreview: View {
                         .padding(.horizontal, max(3, 4 * scale))
                         .padding(.vertical, max(1, 2 * scale))
                         .background(.black.opacity(0.78), in: Capsule())
-                        .offset(y: -max(14, spriteSize.height * scale / 2 + 8 * scale))
+                        .offset(y: -max(14, previewSize.height * scale / 2 + 8 * scale))
                         .allowsHitTesting(false)
                 }
                 .overlay(alignment: .bottom) {
@@ -374,7 +383,7 @@ struct MissionPreview: View {
                 .overlay(alignment: .topTrailing) {
                     if let drop = DropAuthoring.drop(for: index, in: spawn.drops) {
                         DropBadge(drop: drop, scale: scale)
-                            .offset(x: max(8, spriteSize.width * scale / 2 - 4), y: -max(8, spriteSize.height * scale / 2 - 4))
+                            .offset(x: max(8, previewSize.width * scale / 2 - 4), y: -max(8, previewSize.height * scale / 2 - 4))
                             .allowsHitTesting(false)
                     }
                 }

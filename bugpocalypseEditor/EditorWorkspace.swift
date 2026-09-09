@@ -375,6 +375,54 @@ final class EditorWorkspace: ObservableObject {
         return choreographies.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
     }
 
+    func usages(ofChoreography document: ChoreographyEditorDocument) -> [ContentUsage] {
+        let path = resourcePath(for: document.fileURL)
+        return missions.flatMap { mission in
+            mission.definition.timeline.enumerated().compactMap { index, event in
+                guard case let .playChoreography(play) = event.action,
+                      play.choreographyReference.resourcePath == path else { return nil }
+                return .mission(document: mission, eventIndex: index, at: event.at)
+            }
+        }
+    }
+
+    func usages(ofFormation document: FormationEditorDocument) -> [ContentUsage] {
+        usages(ofResource: resourcePath(for: document.fileURL)) { $0.formationReference?.resourcePath }
+    }
+
+    func usages(ofPath document: PathEditorDocument) -> [ContentUsage] {
+        usages(ofResource: resourcePath(for: document.fileURL)) { $0.pathReference?.resourcePath }
+    }
+
+    private func usages(ofResource path: String?, reference: (SpawnFormationEvent) -> String?) -> [ContentUsage] {
+        guard let path else { return [] }
+        let missionUsages: [ContentUsage] = missions.flatMap { mission in
+            mission.definition.timeline.enumerated().compactMap { index, event in
+                guard case let .spawnFormation(spawn) = event.action,
+                      reference(spawn) == path else { return nil }
+                return ContentUsage.mission(document: mission, eventIndex: index, at: event.at)
+            }
+        }
+        let choreographyUsages: [ContentUsage] = choreographies.flatMap { choreography in
+            choreography.definition.timeline.enumerated().compactMap { index, event in
+                guard reference(event.spawn) == path else { return nil }
+                return ContentUsage.choreography(document: choreography, eventIndex: index, at: event.at)
+            }
+        }
+        return missionUsages + choreographyUsages
+    }
+
+    func open(_ usage: ContentUsage) {
+        switch usage.location {
+        case let .mission(document):
+            selectMission(document)
+            selectedMissionEventIndex = usage.eventIndex
+        case let .choreography(document):
+            selectChoreography(document)
+            selectedChoreographyEventIndex = usage.eventIndex
+        }
+    }
+
     func selectWorld(_ document: WorldDocument) {
         selection = .world(document.fileURL)
         selectedCellID = nil
@@ -414,6 +462,20 @@ final class EditorWorkspace: ObservableObject {
         change(&value)
         document.definition = value
         objectWillChange.send()
+    }
+
+    func duplicateSelectedChoreographySpawn() {
+        guard let index = selectedChoreographyEventIndex,
+              let document = selectedChoreography,
+              document.definition.timeline.indices.contains(index) else { return }
+        let source = document.definition.timeline[index]
+        var duplicate = source
+        duplicate.at += 1
+        updateSelectedChoreography { choreography in
+            choreography.timeline.insert(duplicate, at: index + 1)
+        }
+        selectedChoreographyEventIndex = index + 1
+        statusMessage = "Duplicated formation spawn at \(String(format: "%.2f", duplicate.at)) s"
     }
 
     func createChoreography() {
@@ -932,6 +994,12 @@ final class EditorWorkspace: ObservableObject {
         return image
     }
 
+    /// The Ship Fly's artwork has a low, wide silhouette. A modest editor-only
+    /// boost makes its visual weight legible at the timeline preview's zoom.
+    func enemyPreviewVisualScale(for enemyID: String) -> CGFloat {
+        enemyID == "ship_fly" ? 1.35 : 1
+    }
+
     private func atlasImage(named name: String, projectRoot: URL) -> NSImage? {
         let atlasDirectory = projectRoot.appendingPathComponent("assets/textures", isDirectory: true)
         let plistURL = atlasDirectory.appendingPathComponent("textures.plist")
@@ -945,8 +1013,22 @@ final class EditorWorkspace: ObservableObject {
               let subimage = (atlas["subimages"] as? [[String: Any]])?.first(where: { $0["name"] as? String == name }),
               let rectText = subimage["textureRect"] as? String,
               let atlasName = atlas["path"] as? String,
-              let atlasImage = NSImage(contentsOf: atlasDirectory.appendingPathComponent(atlasName)),
-              let cgImage = atlasImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+              let atlasImage = NSImage(contentsOf: atlasDirectory.appendingPathComponent(atlasName)) else { return nil }
+
+        // The PNG carries orientation metadata. Its raw CGImage dimensions are
+        // transposed, while TexturePacker's rectangles describe the displayed
+        // (unrotated) atlas. Rasterize it first so both coordinate systems
+        // agree before extracting a subimage.
+        let normalizedAtlas = NSImage(size: atlasImage.size)
+        normalizedAtlas.lockFocus()
+        atlasImage.draw(
+            in: NSRect(origin: .zero, size: normalizedAtlas.size),
+            from: NSRect(origin: .zero, size: atlasImage.size),
+            operation: .copy,
+            fraction: 1
+        )
+        normalizedAtlas.unlockFocus()
+        guard let cgImage = normalizedAtlas.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
 
         let values = rectText.split { !( $0.isNumber || $0 == "-" || $0 == "." ) }.compactMap { token in
             Double(String(token)).map { CGFloat($0) }
@@ -1246,4 +1328,37 @@ final class EditorWorkspace: ObservableObject {
         return result
     }
 
+}
+
+struct ContentUsage: Identifiable {
+    enum Location {
+        case mission(MissionDocument)
+        case choreography(ChoreographyEditorDocument)
+    }
+
+    let location: Location
+    let eventIndex: Int
+    let at: Double
+
+    var id: String {
+        switch location {
+        case let .mission(document): return "mission:\(document.fileURL.path):\(eventIndex)"
+        case let .choreography(document): return "choreography:\(document.fileURL.path):\(eventIndex)"
+        }
+    }
+
+    var label: String {
+        switch location {
+        case let .mission(document): return "Mission \(document.definition.metadata.displayName)"
+        case let .choreography(document): return "Choreography \(document.definition.name)"
+        }
+    }
+
+    static func mission(document: MissionDocument, eventIndex: Int, at: Double) -> ContentUsage {
+        .init(location: .mission(document), eventIndex: eventIndex, at: at)
+    }
+
+    static func choreography(document: ChoreographyEditorDocument, eventIndex: Int, at: Double) -> ContentUsage {
+        .init(location: .choreography(document), eventIndex: eventIndex, at: at)
+    }
 }
