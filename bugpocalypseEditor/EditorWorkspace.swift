@@ -10,7 +10,7 @@ extension WorldGridCoordinate {
 }
 
 enum EditorSection: String, CaseIterable, Hashable, Identifiable {
-    case worlds, missions, formations, paths, backgrounds
+    case worlds, missions, choreographies, formations, paths, backgrounds
 
     var id: Self { self }
     var title: String { rawValue.capitalized }
@@ -19,6 +19,7 @@ enum EditorSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .worlds: "globe.americas.fill"
         case .missions: "flag.checkered"
+        case .choreographies: "square.stack.3d.up.fill"
         case .formations: "square.grid.3x3.fill"
         case .paths: "point.topleft.down.to.point.bottomright.curvepath"
         case .backgrounds: "photo.on.rectangle.angled"
@@ -30,6 +31,7 @@ enum EditorSelection: Hashable {
     case section(EditorSection)
     case world(URL)
     case mission(URL)
+    case choreography(URL)
     case formation(URL)
     case path(URL)
 }
@@ -119,17 +121,30 @@ final class PathEditorDocument: ObservableObject, Identifiable {
 }
 
 @MainActor
+final class ChoreographyEditorDocument: ObservableObject, Identifiable {
+    let fileURL: URL
+    @Published var definition: ChoreographyDocument
+    private(set) var savedDefinition: ChoreographyDocument
+    var id: URL { fileURL }
+    var isDirty: Bool { definition != savedDefinition }
+    init(fileURL: URL, definition: ChoreographyDocument) { self.fileURL = fileURL; self.definition = definition; self.savedDefinition = definition }
+    func markSaved() { savedDefinition = definition; objectWillChange.send() }
+}
+
+@MainActor
 final class EditorWorkspace: ObservableObject {
     @Published var projectRoot: URL?
     @Published var worlds: [WorldDocument] = []
     @Published var missions: [MissionDocument] = []
     @Published var formations: [FormationEditorDocument] = []
     @Published var paths: [PathEditorDocument] = []
+    @Published var choreographies: [ChoreographyEditorDocument] = []
     @Published var selection: EditorSelection?
     @Published var selectedCellID: String?
     @Published var selectedMissionEventIndex: Int?
     @Published var selectedFormationMemberIndex: Int?
     @Published var selectedPathPointIndex: Int?
+    @Published var selectedChoreographyEventIndex: Int?
     @Published var searchText = ""
     @Published var errorMessage: String?
     @Published var statusMessage = "No project open"
@@ -158,6 +173,11 @@ final class EditorWorkspace: ObservableObject {
         return pathDocument(at: url)
     }
 
+    var selectedChoreography: ChoreographyEditorDocument? {
+        guard case .choreography(let url) = selection else { return nil }
+        return choreographies.first { $0.fileURL == url }
+    }
+
     var selectedCell: WorldCellDefinition? {
         guard let selectedCellID else { return nil }
         return selectedWorld?.definition.cell(id: selectedCellID)
@@ -173,6 +193,7 @@ final class EditorWorkspace: ObservableObject {
         if let mission = selectedMission {
             return missionDiagnostics(for: mission.definition)
         }
+        if let choreography = selectedChoreography { return choreographyDiagnostics(for: choreography.definition) }
         guard let document = selectedWorld else { return [] }
         do {
             try document.definition.validate()
@@ -287,6 +308,11 @@ final class EditorWorkspace: ObservableObject {
                 $0.definition.id.localizedStandardCompare($1.definition.id) == .orderedAscending
             }
 
+            let choreographiesURL = root.appendingPathComponent("godot/assets/choreographies", isDirectory: true)
+            choreographies = try recursiveJSONFiles(at: choreographiesURL).map { url in
+                ChoreographyEditorDocument(fileURL: url, definition: try ContentJSON.decode(ChoreographyDocument.self, from: Data(contentsOf: url)))
+            }.sorted { $0.definition.id.localizedStandardCompare($1.definition.id) == .orderedAscending }
+
             let resolvedRoot = root.standardizedFileURL
             projectRoot = resolvedRoot
             rememberProjectRoot(resolvedRoot)
@@ -316,6 +342,10 @@ final class EditorWorkspace: ObservableObject {
         paths.first { $0.fileURL == url }
     }
 
+    func choreographyDocument(at url: URL) -> ChoreographyEditorDocument? {
+        choreographies.first { $0.fileURL == url }
+    }
+
     func resourcePath(for fileURL: URL) -> String? {
         guard let projectRoot else { return nil }
         let godotRoot = projectRoot.appendingPathComponent("godot", isDirectory: true).standardizedFileURL.path
@@ -337,6 +367,11 @@ final class EditorWorkspace: ObservableObject {
     func mission(for resourcePath: String?) -> MissionDefinition? {
         guard let resourcePath else { return nil }
         return missions.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
+    }
+
+    func choreography(for reference: ChoreographyReference?) -> ChoreographyDocument? {
+        guard let resourcePath = reference?.resourcePath else { return nil }
+        return choreographies.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
     }
 
     func selectWorld(_ document: WorldDocument) {
@@ -364,6 +399,57 @@ final class EditorWorkspace: ObservableObject {
         selectedMissionEventIndex = nil
         selectedFormationMemberIndex = nil
         selectedPathPointIndex = nil
+    }
+
+    func selectChoreography(_ document: ChoreographyEditorDocument) {
+        selection = .choreography(document.fileURL)
+        selectedChoreographyEventIndex = nil
+        selectedCellID = nil
+    }
+
+    func updateSelectedChoreography(_ change: (inout ChoreographyDocument) -> Void) {
+        guard let document = selectedChoreography else { return }
+        var value = document.definition
+        change(&value)
+        document.definition = value
+        objectWillChange.send()
+    }
+
+    func createChoreography() {
+        guard let projectRoot else { return }
+        let directory = projectRoot.appendingPathComponent("godot/assets/choreographies", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let existingIDs = Set(choreographies.map(\.definition.id))
+            var suffix = choreographies.count + 1
+            while existingIDs.contains("choreography_\(suffix)") { suffix += 1 }
+            let id = "choreography_\(suffix)"
+            let definition = ChoreographyDocument(schemaVersion: 1, id: id, name: "New Choreography", authoringStatus: .draft, timeline: [])
+            let url = directory.appendingPathComponent("\(id).json")
+            try ContentJSON.encode(definition).write(to: url, options: .atomic)
+            let document = ChoreographyEditorDocument(fileURL: url, definition: definition)
+            choreographies.append(document)
+            choreographies.sort { $0.definition.id.localizedStandardCompare($1.definition.id) == .orderedAscending }
+            selectChoreography(document)
+            statusMessage = "Created \(url.lastPathComponent)"
+        } catch { errorMessage = "The choreography could not be created: \(error.localizedDescription)" }
+    }
+
+    func addChoreographySpawn() {
+        guard let document = selectedChoreography else { return }
+        let at = (document.definition.timeline.map(\.at).max() ?? -1) + 1
+        let spawn = SpawnFormationEvent(enemy: .init(id: "fly_basic", level: 1), formation: .line(.init(axis: .vertical, count: 3, spacing: 48)), path: .straight(.init(speed: 120)), spawnPosition: .init(edge: .right, xOffset: 24, y: 180))
+        updateSelectedChoreography { $0.timeline.append(.init(at: max(0, at), spawn: spawn)) }
+        selectedChoreographyEventIndex = document.definition.timeline.count - 1
+    }
+
+    func deleteSelectedChoreographyEvent() {
+        guard let index = selectedChoreographyEventIndex else { return }
+        updateSelectedChoreography { definition in
+            guard definition.timeline.indices.contains(index) else { return }
+            definition.timeline.remove(at: index)
+        }
+        selectedChoreographyEventIndex = nil
     }
 
     func updateSelectedPath(_ change: (inout PathDocument) -> Void) {
@@ -797,9 +883,25 @@ final class EditorWorkspace: ObservableObject {
         }
     }
 
+    func saveSelectedChoreography() {
+        guard let document = selectedChoreography else { return }
+        let errors = choreographyDiagnostics(for: document.definition).filter { $0.severity == .error }
+        guard errors.isEmpty else {
+            errorMessage = "The choreography was not saved: fix \(errors.count) structural error\(errors.count == 1 ? "" : "s") first."
+            return
+        }
+        do {
+            try ContentJSON.encode(document.definition).write(to: document.fileURL, options: .atomic)
+            document.markSaved()
+            objectWillChange.send()
+            statusMessage = "Saved \(document.fileURL.lastPathComponent)"
+        } catch { errorMessage = "The choreography was not saved: \(error.localizedDescription)" }
+    }
+
     func saveSelectedDocument() {
         if selectedPath != nil { saveSelectedPath() }
         else if selectedFormation != nil { saveSelectedFormation() }
+        else if selectedChoreography != nil { saveSelectedChoreography() }
         else if selectedMission != nil { saveSelectedMission() }
         else { saveSelectedWorld() }
     }
@@ -920,6 +1022,10 @@ final class EditorWorkspace: ObservableObject {
                     add(.error, "mission.drop.invalid", "Event \(index + 1): \(diagnostic.message)", path + ["drops", "\(diagnostic.memberIndex)"])
                 }
             }
+            if case let .playChoreography(play) = event.action,
+               choreography(for: play.choreographyReference) == nil {
+                add(.error, "mission.choreography.reference", "Event \(index + 1) references a missing choreography.", path + ["choreographyReference"])
+            }
             if case let .spawnBoss(boss) = event.action {
                 if boss.id != "boss1" {
                     add(.error, "mission.boss.unknown", "Event \(index + 1) uses unknown boss '\(boss.id)'.", path + ["id"])
@@ -930,6 +1036,29 @@ final class EditorWorkspace: ObservableObject {
                 if !boss.y.isFinite {
                     add(.error, "mission.boss.y", "Boss spawn height must be finite.", path + ["y"])
                 }
+            }
+        }
+        return result
+    }
+
+    private func choreographyDiagnostics(for choreography: ChoreographyDocument) -> [ContentDiagnostic] {
+        var result: [ContentDiagnostic] = []
+        func add(_ severity: ContentSeverity, _ code: String, _ message: String, _ path: [String]) {
+            result.append(.init(severity: severity, code: code, message: message, location: .init(documentID: choreography.id, path: path)))
+        }
+        if choreography.schemaVersion != 1 { add(.error, "choreography.schema", "Choreographies must use schema version 1.", ["schemaVersion"]) }
+        if choreography.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { add(.error, "choreography.id.empty", "Choreography ID cannot be empty.", ["id"]) }
+        if choreography.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { add(.error, "choreography.name.empty", "Choreography name cannot be empty.", ["name"]) }
+        if choreography.timeline.isEmpty { add(choreography.authoringStatus == .ready ? .error : .warning, "choreography.timeline.empty", "The choreography timeline is empty.", ["timeline"]) }
+        for (index, event) in choreography.timeline.enumerated() {
+            if !event.at.isFinite || event.at < 0 { add(.error, "choreography.event.time", "Spawn \(index + 1) has an invalid time.", ["timeline", "\(index)", "at"]) }
+            if EnemyCatalogue.entry(for: event.spawn.enemy.id) == nil { add(.error, "choreography.enemy.unknown", "Spawn \(index + 1) uses an unknown enemy.", ["timeline", "\(index)", "enemy"]) }
+            if event.spawn.enemy.level < 1 { add(.error, "choreography.enemy.level", "Enemy level must be at least 1.", ["timeline", "\(index)", "enemy", "level"]) }
+            if let reference = event.spawn.formationReference, formation(for: reference) == nil { add(.error, "choreography.formation.reference", "Spawn \(index + 1) references a missing formation.", ["timeline", "\(index)", "formationReference"]) }
+            if let reference = event.spawn.pathReference, path(for: reference) == nil { add(.error, "choreography.path.reference", "Spawn \(index + 1) references a missing path.", ["timeline", "\(index)", "pathReference"]) }
+            let formation = formation(for: event.spawn.formationReference) ?? event.spawn.formation
+            for diagnostic in DropAuthoring.diagnostics(for: event.spawn.drops, memberCount: formation.offsets().count) {
+                add(.error, "choreography.drop.invalid", diagnostic.message, ["timeline", "\(index)", "drops"])
             }
         }
         return result
@@ -984,6 +1113,9 @@ final class EditorWorkspace: ObservableObject {
             positive(value.count, "count"); positive(value.radius, "radius")
             if !value.startAngle.isFinite { add("formation.startAngle.invalid", "startAngle must be finite.", ["formation", "startAngle"]) }
             if !value.endAngle.isFinite { add("formation.endAngle.invalid", "endAngle must be finite.", ["formation", "endAngle"]) }
+        case let .ring(value):
+            positive(value.count, "count"); positive(value.radiusX, "radiusX"); positive(value.radiusY, "radiusY")
+            if !value.rotation.isFinite { add("formation.rotation.invalid", "rotation must be finite.", ["formation", "rotation"]) }
         case let .trail(value):
             positive(value.count, "count"); positive(value.followDelay, "followDelay")
         case let .freeform(value):

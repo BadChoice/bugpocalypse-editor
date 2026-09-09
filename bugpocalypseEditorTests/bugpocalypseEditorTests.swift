@@ -13,14 +13,14 @@ import Testing
 struct bugpocalypseEditorTests {
     @Test func dropAuthoringAddsRemovesAndPreservesOptionalJSONShape() {
         let added = DropAuthoring.addingDefaultDrop(to: 2, in: nil)
-        #expect(added == [.init(kind: .focus, amount: 1, memberIndex: 2)])
+        #expect(added == [.init(kind: .overdrive, amount: 1, memberIndex: 2)])
         #expect(DropAuthoring.addingDefaultDrop(to: 2, in: added) == added)
         #expect(DropAuthoring.removingDrop(for: 2, in: added) == nil)
     }
 
     @Test func dropAuthoringReportsDuplicateInvalidAmountAndOutOfRangeTargets() {
         let diagnostics = DropAuthoring.diagnostics(for: [
-            .init(kind: .focus, amount: 1, memberIndex: 0),
+            .init(kind: .overdrive, amount: 1, memberIndex: 0),
             .init(kind: .coins, amount: 4, memberIndex: 0),
             .init(kind: .rage, amount: 0, memberIndex: 1),
             .init(kind: .health, amount: 5, memberIndex: 3)

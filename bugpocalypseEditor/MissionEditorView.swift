@@ -61,6 +61,13 @@ struct MissionEditorView: View {
                 Button("Spawn Formation") {
                     workspace.addMissionEvent(.spawnFormation(Self.defaultSpawn))
                 }
+                Button("Play Choreography") {
+                    if let choreography = workspace.choreographies.first,
+                       let path = workspace.resourcePath(for: choreography.fileURL) {
+                        workspace.addMissionEvent(.playChoreography(.init(choreographyReference: .init(resourcePath: path))))
+                    }
+                }
+                .disabled(workspace.choreographies.isEmpty)
                 Button("Spawn Boss") {
                     workspace.addMissionEvent(.spawnBoss(Self.defaultBossSpawn))
                 }
@@ -204,6 +211,7 @@ private struct TimelineEventCard: View {
     private var title: String {
         switch event.action {
         case let .spawnFormation(value): EnemyCatalogue.entry(for: value.enemy.id)?.displayName ?? value.enemy.id
+        case .playChoreography: "Choreography"
         case let .spawnBoss(value): "Boss: \(value.id)"
         case .zoomOut: "Zoom Out"
         case .zoomIn: "Zoom In"
@@ -219,6 +227,7 @@ private struct TimelineEventCard: View {
                 ].compactMap { $0 }.joined(separator: " · ")
             }
             return "\(value.formation.offsets().count) × \(value.formation.kind.rawValue)"
+        case let .playChoreography(value): return value.choreographyReference.resourcePath
         case let .spawnBoss(value): return "Enters at y \(Int(value.y))"
         case let .zoomOut(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
         case let .zoomIn(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
@@ -227,6 +236,7 @@ private struct TimelineEventCard: View {
     private var icon: String {
         switch event.action {
         case .spawnFormation: "ant.fill"
+        case .playChoreography: "square.stack.3d.up.fill"
         case .spawnBoss: "crown.fill"
         case .zoomOut, .zoomIn: "camera.fill"
         }
@@ -234,13 +244,18 @@ private struct TimelineEventCard: View {
     private var color: Color {
         switch event.action {
         case .spawnFormation: .orange
+        case .playChoreography: .mint
         case .spawnBoss: .red
         case .zoomOut, .zoomIn: .blue
         }
     }
 }
 
-private struct MissionPreview: View {
+struct MissionPreview: View {
+    /// Preview enemies are assumed defeated after this long, even when their
+    /// authored path loops or ends by staying on screen.
+    private let maximumPreviewLifetime: Double = 15
+
     let mission: MissionDefinition
     @ObservedObject var workspace: EditorWorkspace
     let playhead: Double
@@ -258,10 +273,17 @@ private struct MissionPreview: View {
                 LinearGradient(colors: [Color(red: 0.03, green: 0.08, blue: 0.15), Color(red: 0.08, green: 0.16, blue: 0.18)], startPoint: .top, endPoint: .bottom)
                 previewGrid(origin: origin, scale: scale)
                 ForEach(Array(mission.timeline.enumerated()), id: \.offset) { index, event in
-                    if case let .spawnFormation(spawn) = event.action, event.at <= playhead {
+                    if case let .spawnFormation(spawn) = event.action,
+                       event.at <= playhead,
+                       playhead - event.at <= maximumPreviewLifetime {
                         formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, selectedMember: selectedEventIndex == index ? selectedMemberIndex : nil, origin: origin, scale: scale)
                     }
-                    if case let .spawnBoss(spawn) = event.action, event.at <= playhead {
+                    if case let .playChoreography(play) = event.action {
+                        choreography(play, missionEventIndex: index, missionEventTime: event.at, origin: origin, scale: scale)
+                    }
+                    if case let .spawnBoss(spawn) = event.action,
+                       event.at <= playhead,
+                       playhead - event.at <= maximumPreviewLifetime {
                         boss(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
                     }
                 }
@@ -289,6 +311,25 @@ private struct MissionPreview: View {
     }
 
     @ViewBuilder
+    private func choreography(_ play: PlayChoreographyEvent, missionEventIndex: Int, missionEventTime: Double, origin: CGPoint, scale: CGFloat) -> some View {
+        if let choreography = workspace.choreography(for: play.choreographyReference) {
+            ForEach(Array(choreography.timeline.enumerated()), id: \.offset) { _, child in
+                let spawnTime = missionEventTime + child.at
+                if spawnTime <= playhead, playhead - spawnTime <= maximumPreviewLifetime {
+                    formation(adjustedSpawn(child.spawn, by: play.enemyLevelOffset ?? 0), eventIndex: missionEventIndex, eventTime: spawnTime, elapsed: playhead - spawnTime, selected: selectedEventIndex == missionEventIndex, selectedMember: nil, origin: origin, scale: scale)
+                }
+            }
+        }
+    }
+
+    private func adjustedSpawn(_ spawn: SpawnFormationEvent, by offset: Int) -> SpawnFormationEvent {
+        var result = spawn
+        let (level, overflow) = spawn.enemy.level.addingReportingOverflow(offset)
+        result.enemy.level = overflow ? (offset >= 0 ? Int.max : 1) : max(1, level)
+        return result
+    }
+
+    @ViewBuilder
     private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, selectedMember: Int?, origin: CGPoint, scale: CGFloat) -> some View {
         let pathDefinition = workspace.path(for: spawn.pathReference) ?? spawn.path
         let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
@@ -300,9 +341,11 @@ private struct MissionPreview: View {
                 pathDefinition,
                 elapsed: max(0, elapsed - Double(index) * (formation.followDelay ?? 0))
             )
+            let rawY = (usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y
+            let transformedY = spawn.pathTransform?.mirrorY == true ? 360 - rawY : rawY
             let position = CGPoint(
                 x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x) * scale,
-                y: origin.y + ((usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y) * scale
+                y: origin.y + (transformedY + (spawn.pathTransform?.yOffset ?? 0)) * scale
             )
             let spriteSize = enemyPreviewSize(for: spawn.enemy.id)
             EnemyPreviewSprite(url: enemyAssetURL(spawn.enemy.id), name: spawn.enemy.id, selected: selected && selectedMember == index)
@@ -432,7 +475,7 @@ private struct DropBadge: View {
     }
 
     private var color: Color {
-        switch drop.kind { case .health: .green; case .focus: .cyan; case .rage: .red; case .coins: .yellow }
+        switch drop.kind { case .health: .green; case .overdrive: .cyan; case .rage: .red; case .coins: .yellow }
     }
 }
 
@@ -564,6 +607,7 @@ struct MissionInspector: View {
                 TextField("Time (seconds)", value: eventTimeBinding, format: .number.precision(.fractionLength(2)))
                 Picker("Type", selection: eventTypeBinding) {
                     Text("Spawn Formation").tag(EventEditorKind.spawnFormation)
+                    Text("Play Choreography").tag(EventEditorKind.playChoreography)
                     Text("Spawn Boss").tag(EventEditorKind.spawnBoss)
                     Text("Zoom Out").tag(EventEditorKind.zoomOut)
                     Text("Zoom In").tag(EventEditorKind.zoomIn)
@@ -571,6 +615,7 @@ struct MissionInspector: View {
             }
             switch event.action {
             case let .spawnFormation(spawn): spawnFields(spawn)
+            case let .playChoreography(play): choreographyFields(play)
             case let .spawnBoss(spawn): bossFields(spawn)
             case let .zoomOut(zoom): zoomFields(zoom)
             case let .zoomIn(zoom): zoomFields(zoom)
@@ -579,6 +624,23 @@ struct MissionInspector: View {
                 Button("Duplicate Event") { workspace.duplicateSelectedMissionEvent() }
                 Button("Delete Event", role: .destructive) { workspace.deleteSelectedMissionEvent() }
             }
+        }
+    }
+
+    @ViewBuilder private func choreographyFields(_ play: PlayChoreographyEvent) -> some View {
+        Section("Choreography") {
+            Picker("Resource", selection: choreographyReferencePathBinding) {
+                ForEach(workspace.choreographies) { document in
+                    Text(document.definition.name).tag(workspace.resourcePath(for: document.fileURL) ?? "")
+                }
+            }
+            Text("Runs this reusable local formation timeline at the event time.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Difficulty") {
+            Stepper("Enemy level offset: \(play.enemyLevelOffset ?? 0)", value: choreographyLevelOffsetBinding, in: -99...99)
+            Text("This offset applies to every formation spawn while preserving their authored level differences.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -688,6 +750,12 @@ struct MissionInspector: View {
                 Text("This event uses the saved path at runtime.").font(.caption).foregroundStyle(.secondary)
             }
         }
+        Section("Path Transform") {
+            Toggle("Mirror vertically", isOn: mirrorYBinding)
+            TextField("Vertical shift", value: yOffsetBinding, format: .number)
+            Text("Mirror around the gameplay centre, then apply the vertical shift. This affects the formation and its complete route.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
         dropsFields(spawn)
     }
 
@@ -750,6 +818,11 @@ struct MissionInspector: View {
             TextField("Radius", value: arcBinding(\.radius, fallback: value.radius), format: .number)
             TextField("Start angle", value: arcBinding(\.startAngle, fallback: value.startAngle), format: .number)
             TextField("End angle", value: arcBinding(\.endAngle, fallback: value.endAngle), format: .number)
+        case let .ring(value):
+            Stepper("Count: \(value.count)", value: ringBinding(\.count, fallback: value.count), in: 1...50)
+            TextField("Horizontal radius", value: ringBinding(\.radiusX, fallback: value.radiusX), format: .number)
+            TextField("Vertical radius", value: ringBinding(\.radiusY, fallback: value.radiusY), format: .number)
+            TextField("Rotation", value: ringBinding(\.rotation, fallback: value.rotation), format: .number)
         case let .trail(value):
             Stepper("Count: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...50)
             TextField("Follow delay (seconds)", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
@@ -809,12 +882,13 @@ struct MissionInspector: View {
         }
     }
 
-    private enum EventEditorKind: Hashable { case spawnFormation, spawnBoss, zoomOut, zoomIn }
+    private enum EventEditorKind: Hashable { case spawnFormation, playChoreography, spawnBoss, zoomOut, zoomIn }
     private enum EncounterSource: Hashable { case inline, saved }
     private var eventTypeBinding: Binding<EventEditorKind> {
         Binding(get: {
             switch selectedEvent?.action {
             case .spawnFormation: .spawnFormation
+            case .playChoreography: .playChoreography
             case .spawnBoss: .spawnBoss
             case .zoomOut: .zoomOut
             case .zoomIn: .zoomIn
@@ -824,10 +898,37 @@ struct MissionInspector: View {
             workspace.updateSelectedMissionEvent { event in
                 switch kind {
                 case .spawnFormation: event.action = .spawnFormation(.init(enemy: .init(id: "fly_basic", level: 1), formation: .line(.init(axis: .vertical, count: 3, spacing: 48)), path: .straight(.init(speed: 120)), spawnPosition: .init(edge: .right, xOffset: 24, y: 180)))
+                case .playChoreography:
+                    if let document = workspace.choreographies.first, let path = workspace.resourcePath(for: document.fileURL) { event.action = .playChoreography(.init(choreographyReference: .init(resourcePath: path))) }
                 case .spawnBoss: event.action = .spawnBoss(.init(id: "boss1", level: 1, y: 180))
                 case .zoomOut: event.action = .zoomOut(.init(multiplier: 0.8, duration: 1))
                 case .zoomIn: event.action = .zoomIn(.init(multiplier: 1, duration: 1))
                 }
+            }
+        })
+    }
+
+    private var choreographyReferencePathBinding: Binding<String> {
+        Binding(get: {
+            guard case let .playChoreography(value)? = selectedEvent?.action else { return "" }
+            return value.choreographyReference.resourcePath
+        }, set: { path in
+            workspace.updateSelectedMissionEvent { event in
+                guard !path.isEmpty else { return }
+                event.action = .playChoreography(.init(choreographyReference: .init(resourcePath: path)))
+            }
+        })
+    }
+
+    private var choreographyLevelOffsetBinding: Binding<Int> {
+        Binding(get: {
+            guard case let .playChoreography(value)? = selectedEvent?.action else { return 0 }
+            return value.enemyLevelOffset ?? 0
+        }, set: { offset in
+            workspace.updateSelectedMissionEvent { event in
+                guard case var .playChoreography(value) = event.action else { return }
+                value.enemyLevelOffset = offset == 0 ? nil : offset
+                event.action = .playChoreography(value)
             }
         })
     }
@@ -858,6 +959,24 @@ struct MissionInspector: View {
         )
     }
     private func mutateSpawn(_ change: (inout SpawnFormationEvent) -> Void) { workspace.updateSelectedMissionEvent { event in guard case var .spawnFormation(value) = event.action else { return }; change(&value); event.action = .spawnFormation(value) } }
+    private var mirrorYBinding: Binding<Bool> {
+        Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action { value.pathTransform?.mirrorY ?? false } else { false } }, set: { enabled in
+            mutateSpawn { spawn in
+                var transform = spawn.pathTransform ?? .init()
+                transform.mirrorY = enabled
+                spawn.pathTransform = transform.isIdentity ? nil : transform
+            }
+        })
+    }
+    private var yOffsetBinding: Binding<Double> {
+        Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action { value.pathTransform?.yOffset ?? 0 } else { 0 } }, set: { offset in
+            mutateSpawn { spawn in
+                var transform = spawn.pathTransform ?? .init()
+                transform.yOffset = offset
+                spawn.pathTransform = transform.isIdentity ? nil : transform
+            }
+        })
+    }
     private func bossBinding<Value>(
         _ keyPath: WritableKeyPath<SpawnBossEvent, Value>,
         fallback: Value
@@ -1001,6 +1120,7 @@ struct MissionInspector: View {
     private func vBinding<Value>(_ kp: WritableKeyPath<VFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .v(v) = $0 { v } else { nil } }, FormationDefinition.v, kp, fallback: fallback) }
     private func gridBinding<Value>(_ kp: WritableKeyPath<StaggeredGridFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .staggeredGrid(v) = $0 { v } else { nil } }, FormationDefinition.staggeredGrid, kp, fallback: fallback) }
     private func arcBinding<Value>(_ kp: WritableKeyPath<ArcFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .arc(v) = $0 { v } else { nil } }, FormationDefinition.arc, kp, fallback: fallback) }
+    private func ringBinding<Value>(_ kp: WritableKeyPath<RingFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .ring(v) = $0 { v } else { nil } }, FormationDefinition.ring, kp, fallback: fallback) }
     private func trailBinding<Value>(_ kp: WritableKeyPath<TrailFormation, Value>, fallback: Value) -> Binding<Value> { formationBinding({ if case let .trail(v) = $0 { v } else { nil } }, FormationDefinition.trail, kp, fallback: fallback) }
 
     private func pathBinding<Value, Payload>(_ extract: @escaping (MovementPathDefinition) -> Payload?, _ wrap: @escaping (Payload) -> MovementPathDefinition, _ kp: WritableKeyPath<Payload, Value>, fallback: Value) -> Binding<Value> {
@@ -1031,7 +1151,7 @@ struct MissionInspector: View {
     private var zoomDurationBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.duration; case let .zoomIn(v): v.duration; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.duration = max(0, value); event.action = .zoomOut(v); case var .zoomIn(v): v.duration = max(0, value); event.action = .zoomIn(v); default: break } } }) }
 
     private static let defaultBossPath = MovementPathDefinition.waypoints(.init(duration: 8, points: [.init(x: 1.2, y: 0.5), .init(x: 0.72, y: 0.25), .init(x: 0.58, y: 0.72), .init(x: 0.72, y: 0.5)], loopToPoint: 1))
-    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
+    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .ring: .ring(.init(count: 6, radiusX: 92, radiusY: 64, rotation: 0)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
     private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
 }

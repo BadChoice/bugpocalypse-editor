@@ -17,12 +17,12 @@ write no `drops` key. Each entry uses the existing schema:
 
 ```json
 "drops": [
-  { "kind": "focus", "amount": 10, "memberIndex": 0 },
+  { "kind": "overdrive", "amount": 10, "memberIndex": 0 },
   { "kind": "coins", "amount": 5, "memberIndex": 4 }
 ]
 ```
 
-Supported kinds are `health`, `focus`, `rage`, and `coins`. A drop is fixed
+Supported kinds are `health`, `overdrive`, `rage`, and `coins`. A drop is fixed
 and guaranteed: the named enemy releases the stated amount when defeated.
 No probability, condition, rarity, or loot-table fields are written in this
 version.
@@ -39,7 +39,7 @@ The preview provides the primary target-selection interaction:
 1. Click a visible formation member in the preview. Its existing selection
    treatment identifies the target and its zero-based index.
 2. Click **Add Drop**. The editor adds one default drop to that member (use
-   `focus`, amount `1`) and selects it in the Drops section.
+   `overdrive`, amount `1`) and selects it in the Drops section.
 3. Edit its kind and positive whole-number amount in the inspector, or remove
    it with that row's remove action.
 

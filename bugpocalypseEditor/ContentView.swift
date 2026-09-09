@@ -58,6 +58,14 @@ struct ContentView: View {
             }
         case .section(.missions):
             MissionWelcomeView(workspace: workspace)
+        case .choreography(let url):
+            if let document = workspace.choreographyDocument(at: url) {
+                ChoreographyEditorView(workspace: workspace, document: document).id(url)
+            } else {
+                ContentUnavailableView("Choreography not found", systemImage: "square.stack.3d.up")
+            }
+        case .section(.choreographies):
+            ChoreographyWelcomeView(workspace: workspace)
         case .formation(let url):
             if let document = workspace.formationDocument(at: url) {
                 FormationEditorView(workspace: workspace, document: document)
@@ -95,6 +103,8 @@ struct ContentView: View {
     private var inspector: some View {
         if workspace.selectedPath != nil {
             PathInspector(workspace: workspace)
+        } else if workspace.selectedChoreography != nil {
+            ChoreographyInspector(workspace: workspace)
         } else if workspace.selectedFormation != nil {
             FormationInspector(workspace: workspace)
         } else if workspace.selectedMission != nil {
@@ -109,6 +119,21 @@ struct ContentView: View {
             get: { workspace.errorMessage != nil },
             set: { if !$0 { workspace.errorMessage = nil } }
         )
+    }
+}
+
+private struct ChoreographyWelcomeView: View {
+    @ObservedObject var workspace: EditorWorkspace
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "square.stack.3d.up.fill").font(.system(size: 48)).foregroundStyle(.mint)
+            Text("Choreographies").font(.largeTitle.bold())
+            Text(workspace.choreographies.isEmpty ? "Create a reusable local timeline of formation spawns." : "Select a choreography to edit its formation timeline.")
+                .foregroundStyle(.secondary)
+            Button(workspace.choreographies.isEmpty ? "Create Choreography" : "Open \(workspace.choreographies[0].definition.name)") {
+                if let first = workspace.choreographies.first { workspace.selectChoreography(first) } else { workspace.createChoreography() }
+            }.buttonStyle(.borderedProminent)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

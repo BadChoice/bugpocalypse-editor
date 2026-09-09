@@ -14,7 +14,7 @@ enum DropAuthoring {
 
     static func addingDefaultDrop(to memberIndex: Int, in drops: [DropDefinition]?) -> [DropDefinition]? {
         guard drop(for: memberIndex, in: drops) == nil else { return drops }
-        return ((drops ?? []) + [.init(kind: .focus, amount: 1, memberIndex: memberIndex)])
+        return ((drops ?? []) + [.init(kind: .overdrive, amount: 1, memberIndex: memberIndex)])
             .sorted { $0.memberIndex < $1.memberIndex }
     }
 

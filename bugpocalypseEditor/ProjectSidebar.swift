@@ -3,13 +3,13 @@ import SwiftUI
 
 struct ProjectSidebar: View {
     @ObservedObject var workspace: EditorWorkspace
+    @State private var expandedSections = Set(EditorSection.allCases)
 
     var body: some View {
         List(selection: $workspace.selection) {
             Section("Project") {
                 ForEach(EditorSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(EditorSelection.section(section))
+                    DisclosureGroup(isExpanded: expansionBinding(for: section)) {
 
                     if section == .worlds {
                         ForEach(filteredWorlds) { document in
@@ -47,6 +47,20 @@ struct ProjectSidebar: View {
                             }
                             .padding(.leading, 16)
                             .tag(EditorSelection.mission(document.fileURL))
+                        }
+                    }
+                    if section == .choreographies {
+                        ForEach(filteredChoreographies) { document in
+                            HStack(spacing: 7) {
+                                Image(systemName: "square.stack.3d.up.fill").foregroundStyle(.secondary)
+                                Text(document.definition.name).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text("\(document.definition.timeline.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                if document.definition.authoringStatus == .draft { Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange) }
+                                if document.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
+                            }
+                            .padding(.leading, 16)
+                            .tag(EditorSelection.choreography(document.fileURL))
                         }
                     }
                     if section == .formations {
@@ -89,6 +103,10 @@ struct ProjectSidebar: View {
                             .tag(EditorSelection.path(document.fileURL))
                         }
                     }
+                    } label: {
+                        Label(section.title, systemImage: section.systemImage)
+                            .tag(EditorSelection.section(section))
+                    }
                 }
             }
         }
@@ -119,7 +137,24 @@ struct ProjectSidebar: View {
                     .disabled(workspace.projectRoot == nil)
                 }
             }
+            if isChoreographyContext {
+                ToolbarItem {
+                    Button(action: workspace.createChoreography) { Label("New Choreography", systemImage: "plus") }
+                        .help("Create a reusable choreography")
+                        .disabled(workspace.projectRoot == nil)
+                }
+            }
         }
+    }
+
+    private func expansionBinding(for section: EditorSection) -> Binding<Bool> {
+        Binding(
+            get: { expandedSections.contains(section) },
+            set: { isExpanded in
+                if isExpanded { expandedSections.insert(section) }
+                else { expandedSections.remove(section) }
+            }
+        )
     }
 
     private var filteredWorlds: [WorldDocument] {
@@ -156,6 +191,11 @@ struct ProjectSidebar: View {
         }
     }
 
+    private var filteredChoreographies: [ChoreographyEditorDocument] {
+        guard !workspace.searchText.isEmpty else { return workspace.choreographies }
+        return workspace.choreographies.filter { $0.definition.name.localizedCaseInsensitiveContains(workspace.searchText) || $0.definition.id.localizedCaseInsensitiveContains(workspace.searchText) }
+    }
+
     private var isFormationContext: Bool {
         switch workspace.selection {
         case .formation, .section(.formations): true
@@ -170,12 +210,19 @@ struct ProjectSidebar: View {
         }
     }
 
+    private var isChoreographyContext: Bool {
+        switch workspace.selection {
+        case .choreography, .section(.choreographies): true
+        default: false
+        }
+    }
+
     private func pathSymbol(_ kind: MovementPathKind) -> String {
         switch kind {
         case .straight: "arrow.left"
         case .sine: "waveform.path"
-        case .waypoints: "point.topleft.down.to.point.bottomright.curvepath"
-        case .bezier: "skew"
+        case .waypoints: "point.3.connected.trianglepath.dotted"
+        case .bezier: "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
 
@@ -187,6 +234,7 @@ struct ProjectSidebar: View {
         case .arc: "rainbow"
         case .trail: "point.3.connected.trianglepath.dotted"
         case .freeform: "point.3.connected.trianglepath.dotted"
+        case .ring: "circle.grid.cross"
         }
     }
 }
@@ -223,14 +271,14 @@ struct EditorStatusBar: View {
 
 
     private var selectedFilePath: String? {
-        (workspace.selectedPath?.fileURL ?? workspace.selectedFormation?.fileURL ?? workspace.selectedMission?.fileURL ?? workspace.selectedWorld?.fileURL)?.path(percentEncoded: false)
+        (workspace.selectedPath?.fileURL ?? workspace.selectedFormation?.fileURL ?? workspace.selectedChoreography?.fileURL ?? workspace.selectedMission?.fileURL ?? workspace.selectedWorld?.fileURL)?.path(percentEncoded: false)
     }
 
     private var selectedStatus: AuthoringStatus? {
-        workspace.selectedPath?.definition.authoringStatus ?? workspace.selectedFormation?.definition.authoringStatus ?? workspace.selectedMission?.definition.authoringStatus ?? workspace.selectedWorld?.definition.authoringStatus
+        workspace.selectedPath?.definition.authoringStatus ?? workspace.selectedFormation?.definition.authoringStatus ?? workspace.selectedChoreography?.definition.authoringStatus ?? workspace.selectedMission?.definition.authoringStatus ?? workspace.selectedWorld?.definition.authoringStatus
     }
 
     private var isDirty: Bool {
-        workspace.selectedPath?.isDirty ?? workspace.selectedFormation?.isDirty ?? workspace.selectedMission?.isDirty ?? workspace.selectedWorld?.isDirty ?? false
+        workspace.selectedPath?.isDirty ?? workspace.selectedFormation?.isDirty ?? workspace.selectedChoreography?.isDirty ?? workspace.selectedMission?.isDirty ?? workspace.selectedWorld?.isDirty ?? false
     }
 }

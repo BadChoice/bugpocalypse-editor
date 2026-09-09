@@ -4,7 +4,7 @@ import SwiftUI
 struct PathEditorView: View {
     @ObservedObject var workspace: EditorWorkspace
     @ObservedObject var document: PathEditorDocument
-    @State private var zoom: CGFloat = 1
+    @State private var zoom: CGFloat = 0.5
     @State private var showTrace = true
     @State private var showSampledTimes = true
 
