@@ -19,6 +19,7 @@ struct ChoreographyEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button(action: workspace.createChoreography) { Label("New", systemImage: "plus") }
                 Button(action: workspace.addChoreographySpawn) { Label("Add Formation", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
             }

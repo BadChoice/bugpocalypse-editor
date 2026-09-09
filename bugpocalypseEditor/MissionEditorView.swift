@@ -121,6 +121,7 @@ struct MissionEditorView: View {
                             } label: {
                                 TimelineEventCard(
                                     event: item.element,
+                                    choreographyName: choreographyName(for: item.element),
                                     isSelected: workspace.selectedMissionEventIndex == item.offset
                                 )
                             }
@@ -149,6 +150,11 @@ struct MissionEditorView: View {
         max(10, (document.definition.timeline.map(\.at).max() ?? 0) + 10)
     }
 
+    private func choreographyName(for event: MissionTimelineEvent) -> String? {
+        guard case let .playChoreography(play) = event.action else { return nil }
+        return workspace.choreography(for: play.choreographyReference)?.name
+    }
+
     private func timeText(_ value: Double) -> String { String(format: "%05.2f", value) }
 
     private func selectTimelineEvent(_ index: Int, _ at: Double) {
@@ -173,6 +179,7 @@ struct MissionEditorView: View {
 
 private struct TimelineEventCard: View {
     let event: MissionTimelineEvent
+    let choreographyName: String?
     let isSelected: Bool
 
     var body: some View {
@@ -211,7 +218,7 @@ private struct TimelineEventCard: View {
     private var title: String {
         switch event.action {
         case let .spawnFormation(value): EnemyCatalogue.entry(for: value.enemy.id)?.displayName ?? value.enemy.id
-        case .playChoreography: "Choreography"
+        case .playChoreography: choreographyName ?? "Missing choreography"
         case let .spawnBoss(value): "Boss: \(value.id)"
         case .zoomOut: "Zoom Out"
         case .zoomIn: "Zoom In"
@@ -227,7 +234,7 @@ private struct TimelineEventCard: View {
                 ].compactMap { $0 }.joined(separator: " · ")
             }
             return "\(value.formation.offsets().count) × \(value.formation.kind.rawValue)"
-        case let .playChoreography(value): return value.choreographyReference.resourcePath
+        case .playChoreography: return "Reusable choreography"
         case let .spawnBoss(value): return "Enters at y \(Int(value.y))"
         case let .zoomOut(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)
         case let .zoomIn(value): return String(format: "%.2f× · %.1f s", value.multiplier, value.duration)

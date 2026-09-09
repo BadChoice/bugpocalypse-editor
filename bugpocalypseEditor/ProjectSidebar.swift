@@ -137,12 +137,10 @@ struct ProjectSidebar: View {
                     .disabled(workspace.projectRoot == nil)
                 }
             }
-            if isChoreographyContext {
-                ToolbarItem {
-                    Button(action: workspace.createChoreography) { Label("New Choreography", systemImage: "plus") }
-                        .help("Create a reusable choreography")
-                        .disabled(workspace.projectRoot == nil)
-                }
+            ToolbarItem {
+                Button(action: workspace.createChoreography) { Label("New Choreography", systemImage: "plus") }
+                    .help("Create a reusable choreography")
+                    .disabled(workspace.projectRoot == nil)
             }
         }
     }
@@ -206,13 +204,6 @@ struct ProjectSidebar: View {
     private var isPathContext: Bool {
         switch workspace.selection {
         case .path, .section(.paths): true
-        default: false
-        }
-    }
-
-    private var isChoreographyContext: Bool {
-        switch workspace.selection {
-        case .choreography, .section(.choreographies): true
         default: false
         }
     }

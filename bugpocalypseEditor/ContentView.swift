@@ -130,9 +130,14 @@ private struct ChoreographyWelcomeView: View {
             Text("Choreographies").font(.largeTitle.bold())
             Text(workspace.choreographies.isEmpty ? "Create a reusable local timeline of formation spawns." : "Select a choreography to edit its formation timeline.")
                 .foregroundStyle(.secondary)
-            Button(workspace.choreographies.isEmpty ? "Create Choreography" : "Open \(workspace.choreographies[0].definition.name)") {
-                if let first = workspace.choreographies.first { workspace.selectChoreography(first) } else { workspace.createChoreography() }
-            }.buttonStyle(.borderedProminent)
+            if let first = workspace.choreographies.first {
+                Button("Open \(first.definition.name)") { workspace.selectChoreography(first) }
+                    .buttonStyle(.borderedProminent)
+                Button("New Choreography", action: workspace.createChoreography)
+            } else {
+                Button("Create Choreography", action: workspace.createChoreography)
+                    .buttonStyle(.borderedProminent)
+            }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
