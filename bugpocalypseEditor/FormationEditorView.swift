@@ -233,6 +233,9 @@ struct FormationInspector: View {
                 pixels("Horizontal radius", ringBinding(\.radiusX, fallback: value.radiusX))
                 pixels("Vertical radius", ringBinding(\.radiusY, fallback: value.radiusY))
                 degrees("Rotation", ringBinding(\.rotation, fallback: value.rotation))
+                TextField("Orbit speed (°/s)", value: ringBinding(\.orbitSpeed, fallback: value.orbitSpeed), format: .number.precision(.fractionLength(0...2)))
+                Text("Positive values orbit clockwise; negative values orbit counter-clockwise. Zero keeps the ring static.")
+                    .font(.caption).foregroundStyle(.secondary)
             case let .trail(value):
                 Stepper("Members: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...100)
                 TextField("Follow delay (seconds)", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
@@ -435,7 +438,7 @@ struct FormationInspector: View {
         case .v: .v(.init(count: 5, spacing: 36, depth: 28))
         case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48))
         case .arc: .arc(.init(count: 5, radius: 80, startAngle: 120, endAngle: 240))
-        case .ring: .ring(.init(count: 6, radiusX: 92, radiusY: 64, rotation: 0))
+        case .ring: .ring(.init(count: 6, radiusX: 92, radiusY: 64, rotation: 0, orbitSpeed: 0))
         case .trail: .trail(.init(count: 5, followDelay: 0.35))
         case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))]))
         }

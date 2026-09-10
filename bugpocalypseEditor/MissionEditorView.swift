@@ -23,7 +23,6 @@ struct MissionEditorView: View {
                     selectedEventIndex: workspace.selectedMissionEventIndex,
                     selectedMemberIndex: workspace.selectedFormationMemberIndex,
                     enemyPreviewImage: workspace.enemyPreviewImage,
-                    enemyPreviewVisualScale: workspace.enemyPreviewVisualScale,
                     selectEvent: selectTimelineEvent,
                     selectMember: selectFormationMember
                 )
@@ -275,7 +274,6 @@ struct MissionPreview: View {
     let selectedEventIndex: Int?
     let selectedMemberIndex: Int?
     let enemyPreviewImage: (String) -> NSImage?
-    let enemyPreviewVisualScale: (String) -> CGFloat
     let selectEvent: (Int, Double) -> Void
     let selectMember: (Int, Int, Double) -> Void
 
@@ -358,7 +356,7 @@ struct MissionPreview: View {
             let rawY = (usesAuthoredStart ? 0 : spawn.spawnPosition.y) + offset.y + path.y
             let transformedY = spawn.pathTransform?.mirrorY == true ? 360 - rawY : rawY
             let position = CGPoint(
-                x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x) * scale,
+                x: origin.x + ((usesAuthoredStart ? 0 : legacyAnchorX) + offset.x + path.x + (spawn.pathTransform?.xOffset ?? 0)) * scale,
                 y: origin.y + (transformedY + (spawn.pathTransform?.yOffset ?? 0)) * scale
             )
             let image = enemyPreviewImage(spawn.enemy.id)
@@ -747,6 +745,9 @@ struct MissionInspector: View {
                 Text("This event uses the saved formation at runtime.").font(.caption).foregroundStyle(.secondary)
             }
         }
+        Section("Formation Attack") {
+            FormationAttackEditor(attack: spawnBinding(\.attack, fallback: spawn.attack))
+        }
         Section("Movement Path") {
             Picker("Source", selection: pathSourceBinding) {
                 Text("Inline").tag(EncounterSource.inline)
@@ -768,8 +769,9 @@ struct MissionInspector: View {
         }
         Section("Path Transform") {
             Toggle("Mirror vertically", isOn: mirrorYBinding)
+            TextField("Horizontal shift", value: xOffsetBinding, format: .number)
             TextField("Vertical shift", value: yOffsetBinding, format: .number)
-            Text("Mirror around the gameplay centre, then apply the vertical shift. This affects the formation and its complete route.")
+            Text("Mirror around the gameplay centre, then shift the complete formation and route. Reuse one path at different positions.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         dropsFields(spawn)
@@ -839,6 +841,7 @@ struct MissionInspector: View {
             TextField("Horizontal radius", value: ringBinding(\.radiusX, fallback: value.radiusX), format: .number)
             TextField("Vertical radius", value: ringBinding(\.radiusY, fallback: value.radiusY), format: .number)
             TextField("Rotation", value: ringBinding(\.rotation, fallback: value.rotation), format: .number)
+            TextField("Orbit speed (°/s)", value: ringBinding(\.orbitSpeed, fallback: value.orbitSpeed), format: .number)
         case let .trail(value):
             Stepper("Count: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...50)
             TextField("Follow delay (seconds)", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
@@ -989,6 +992,15 @@ struct MissionInspector: View {
             mutateSpawn { spawn in
                 var transform = spawn.pathTransform ?? .init()
                 transform.yOffset = offset
+                spawn.pathTransform = transform.isIdentity ? nil : transform
+            }
+        })
+    }
+    private var xOffsetBinding: Binding<Double> {
+        Binding(get: { if case let .spawnFormation(value)? = selectedEvent?.action { value.pathTransform?.xOffset ?? 0 } else { 0 } }, set: { offset in
+            mutateSpawn { spawn in
+                var transform = spawn.pathTransform ?? .init()
+                transform.xOffset = offset
                 spawn.pathTransform = transform.isIdentity ? nil : transform
             }
         })
@@ -1167,7 +1179,62 @@ struct MissionInspector: View {
     private var zoomDurationBinding: Binding<Double> { Binding(get: { switch selectedEvent?.action { case let .zoomOut(v): v.duration; case let .zoomIn(v): v.duration; default: 1 } }, set: { value in workspace.updateSelectedMissionEvent { event in switch event.action { case var .zoomOut(v): v.duration = max(0, value); event.action = .zoomOut(v); case var .zoomIn(v): v.duration = max(0, value); event.action = .zoomIn(v); default: break } } }) }
 
     private static let defaultBossPath = MovementPathDefinition.waypoints(.init(duration: 8, points: [.init(x: 1.2, y: 0.5), .init(x: 0.72, y: 0.25), .init(x: 0.58, y: 0.72), .init(x: 0.72, y: 0.5)], loopToPoint: 1))
-    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .ring: .ring(.init(count: 6, radiusX: 92, radiusY: 64, rotation: 0)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
+    private func defaultFormation(_ kind: FormationKind) -> FormationDefinition { switch kind { case .line: .line(.init(axis: .vertical, count: 3, spacing: 48)); case .slottedLine: .slottedLine(.init(axis: .vertical, slotCount: 5, spacing: 48, occupiedSlots: [0, 2, 4])); case .v: .v(.init(count: 5, spacing: 36, depth: 28)); case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 48, spacingY: 48)); case .arc: .arc(.init(count: 5, radius: 80, startAngle: -60, endAngle: 60)); case .ring: .ring(.init(count: 6, radiusX: 92, radiusY: 64, rotation: 0, orbitSpeed: 0)); case .trail: .trail(.init(count: 5, followDelay: 0.35)); case .freeform: .freeform(.init(members: [.init(id: "member_1", offset: .init(x: 0, y: 0))])) } }
     private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
+}
+
+/// Shared encounter attack controls used by mission and choreography spawns.
+struct FormationAttackEditor: View {
+    @Binding var attack: FormationAttackDefinition?
+
+    var body: some View {
+        Toggle("Enable formation attack", isOn: enabled)
+        if attack != nil {
+            Picker("Pattern", selection: kind) {
+                ForEach(FormationAttackKind.allCases, id: \.self) { kind in
+                    Text(kind.rawValue.capitalized).tag(kind)
+                }
+            }
+            TextField("Initial delay (seconds)", value: initialDelay, format: .number)
+            TextField("Volley interval (seconds)", value: interval, format: .number)
+            Stepper("Shooters per volley: \(shootersPerVolley.wrappedValue)", value: shootersPerVolley, in: 1...50)
+            Text("Rotates through visible enemies that can fire. The delay begins once an eligible enemy enters the play area.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var enabled: Binding<Bool> {
+        Binding(
+            get: { attack != nil },
+            set: { isEnabled in attack = isEnabled ? Self.defaultAttack : nil }
+        )
+    }
+
+    private var kind: Binding<FormationAttackKind> {
+        Binding(get: { attack?.kind ?? .rotating }, set: { value in update { $0.kind = value } })
+    }
+    private var initialDelay: Binding<Double> {
+        Binding(get: { attack?.initialDelay ?? 0.8 }, set: { value in update { $0.initialDelay = max(0, value) } })
+    }
+    private var interval: Binding<Double> {
+        Binding(get: { attack?.interval ?? 1.4 }, set: { value in update { $0.interval = max(0.1, value) } })
+    }
+    private var shootersPerVolley: Binding<Int> {
+        Binding(get: { attack?.shootersPerVolley ?? 1 }, set: { value in update { $0.shootersPerVolley = max(1, value) } })
+    }
+
+    private func update(_ change: (inout FormationAttackDefinition) -> Void) {
+        guard var value = attack else { return }
+        change(&value)
+        attack = value
+    }
+
+    private static let defaultAttack = FormationAttackDefinition(
+        kind: .rotating,
+        initialDelay: 0.8,
+        interval: 1.4,
+        shootersPerVolley: 1
+    )
 }

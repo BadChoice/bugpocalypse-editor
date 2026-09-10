@@ -33,7 +33,6 @@ struct ChoreographyEditorView: View {
                     selectedEventIndex: workspace.selectedChoreographyEventIndex,
                     selectedMemberIndex: nil,
                     enemyPreviewImage: workspace.enemyPreviewImage,
-                    enemyPreviewVisualScale: workspace.enemyPreviewVisualScale,
                     selectEvent: selectTimelineEvent,
                     selectMember: { _, index, at in selectTimelineEvent(index, at) }
                 )
@@ -187,6 +186,9 @@ struct ChoreographyInspector: View {
             }
             Stepper("Level: \(event.spawn.enemy.level)", value: spawnBinding(\.enemy.level, fallback: event.spawn.enemy.level), in: 1...100)
         }
+        Section("Formation Attack") {
+            FormationAttackEditor(attack: spawnBinding(\.attack, fallback: event.spawn.attack))
+        }
         Section("Reusable Sources") {
             Picker("Formation source", selection: formationIsSavedBinding) {
                 Text("Inline").tag(false)
@@ -209,8 +211,9 @@ struct ChoreographyInspector: View {
         }
         Section("Path Transform") {
             Toggle("Mirror vertically", isOn: mirrorYBinding)
+            TextField("Horizontal shift", value: xOffsetBinding, format: .number)
             TextField("Vertical shift", value: yOffsetBinding, format: .number)
-            Text("Mirror around the gameplay centre, then apply the vertical shift. This affects the formation and its complete route.")
+            Text("Mirror around the gameplay centre, then shift the complete formation and route. Reuse one path at different positions.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         dropsFields(event)
@@ -253,6 +256,7 @@ struct ChoreographyInspector: View {
     private var inlineFormationKindBinding: Binding<FormationKind> { Binding(get: { selectedEvent?.spawn.formation.kind ?? .line }, set: { kind in mutateSpawn { $0.formation = InlineFormationFields.defaultFormation(kind) } }) }
     private var pathPathBinding: Binding<String> { Binding(get: { selectedEvent?.spawn.pathReference?.resourcePath ?? "" }, set: { path in mutateSpawn { $0.pathReference = path.isEmpty ? nil : .init(resourcePath: path) } }) }
     private var mirrorYBinding: Binding<Bool> { Binding(get: { selectedEvent?.spawn.pathTransform?.mirrorY ?? false }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.mirrorY = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }
+    private var xOffsetBinding: Binding<Double> { Binding(get: { selectedEvent?.spawn.pathTransform?.xOffset ?? 0 }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.xOffset = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }
     private var yOffsetBinding: Binding<Double> { Binding(get: { selectedEvent?.spawn.pathTransform?.yOffset ?? 0 }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.yOffset = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }
     private func dropKindBinding(fallback: DropKind) -> Binding<DropKind> { Binding(get: { selectedEvent?.spawn.drops?.first?.kind ?? fallback }, set: { value in mutateSpawn { $0.drops?[0].kind = value } }) }
     private func dropAmountBinding(fallback: Int) -> Binding<Int> { Binding(get: { selectedEvent?.spawn.drops?.first?.amount ?? fallback }, set: { value in mutateSpawn { $0.drops?[0].amount = value } }) }
@@ -297,6 +301,7 @@ private struct InlineFormationFields: View {
             TextField("Horizontal radius", value: ringBinding(\.radiusX, fallback: value.radiusX), format: .number)
             TextField("Vertical radius", value: ringBinding(\.radiusY, fallback: value.radiusY), format: .number)
             TextField("Rotation", value: ringBinding(\.rotation, fallback: value.rotation), format: .number)
+            TextField("Orbit speed (°/s)", value: ringBinding(\.orbitSpeed, fallback: value.orbitSpeed), format: .number)
         case let .trail(value):
             Stepper("Count: \(value.count)", value: trailBinding(\.count, fallback: value.count), in: 1...50)
             TextField("Follow delay", value: trailBinding(\.followDelay, fallback: value.followDelay), format: .number)
@@ -313,7 +318,7 @@ private struct InlineFormationFields: View {
         case .v: .v(.init(count: 5, spacing: 36, depth: 24))
         case .staggeredGrid: .staggeredGrid(.init(rows: 2, columns: 3, spacingX: 44, spacingY: 48))
         case .arc: .arc(.init(count: 5, radius: 80, startAngle: 120, endAngle: 240))
-        case .ring: .ring(.init(count: 5, radiusX: 80, radiusY: 56, rotation: 0))
+        case .ring: .ring(.init(count: 5, radiusX: 80, radiusY: 56, rotation: 0, orbitSpeed: 0))
         case .trail: .trail(.init(count: 4, followDelay: 0.2))
         case .freeform: .freeform(.init(members: [.init(offset: .init(x: 0, y: 0))]))
         }
