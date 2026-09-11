@@ -343,7 +343,7 @@ struct MissionPreview: View {
 
     @ViewBuilder
     private func formation(_ spawn: SpawnFormationEvent, eventIndex: Int, eventTime: Double, elapsed: Double, selected: Bool, selectedMember: Int?, origin: CGPoint, scale: CGFloat) -> some View {
-        let pathDefinition = workspace.path(for: spawn.pathReference) ?? spawn.path
+        let pathDefinition = (workspace.path(for: spawn.pathReference) ?? spawn.path).applying(spawn.pathReference?.overrides)
         let formation = workspace.formation(for: spawn.formationReference) ?? spawn.formation
         let dropDiagnostics = DropAuthoring.diagnostics(for: spawn.drops, memberCount: formation.offsets().count)
         ForEach(Array(formation.offsets().enumerated()), id: \.offset) { index, offset in
@@ -646,6 +646,13 @@ struct MissionInspector: View {
             Picker("Resource", selection: choreographyReferencePathBinding) {
                 ForEach(workspace.choreographies) { document in
                     Text(document.definition.name).tag(workspace.resourcePath(for: document.fileURL) ?? "")
+                }
+            }
+            if let choreography = workspace.choreographyDocument(for: play.choreographyReference) {
+                Button {
+                    workspace.selectChoreography(choreography)
+                } label: {
+                    Label("Edit selected choreography", systemImage: "pencil")
                 }
             }
             Text("Runs this reusable local formation timeline at the event time.")

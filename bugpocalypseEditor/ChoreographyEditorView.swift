@@ -206,6 +206,14 @@ struct ChoreographyInspector: View {
                 Text("Inline default").tag("")
                 ForEach(workspace.paths) { Text($0.definition.name).tag(workspace.resourcePath(for: $0.fileURL) ?? "") }
             }
+            if let duration = workspace.path(for: event.spawn.pathReference)?.duration {
+                Toggle("Override path duration", isOn: pathDurationOverrideEnabledBinding)
+                if event.spawn.pathReference?.overrides?.duration != nil {
+                    TextField("Duration (seconds)", value: pathDurationOverrideBinding(fallback: duration), format: .number)
+                    Text("Changes this choreography spawn only; the saved path remains unchanged.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Text("Select a saved formation or path for reusable encounter geometry and movement.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -255,6 +263,25 @@ struct ChoreographyInspector: View {
     private var inlineFormationBinding: Binding<FormationDefinition> { Binding(get: { selectedEvent?.spawn.formation ?? .line(.init(axis: .vertical, count: 3, spacing: 48)) }, set: { value in mutateSpawn { $0.formation = value } }) }
     private var inlineFormationKindBinding: Binding<FormationKind> { Binding(get: { selectedEvent?.spawn.formation.kind ?? .line }, set: { kind in mutateSpawn { $0.formation = InlineFormationFields.defaultFormation(kind) } }) }
     private var pathPathBinding: Binding<String> { Binding(get: { selectedEvent?.spawn.pathReference?.resourcePath ?? "" }, set: { path in mutateSpawn { $0.pathReference = path.isEmpty ? nil : .init(resourcePath: path) } }) }
+    private var pathDurationOverrideEnabledBinding: Binding<Bool> { Binding(get: { selectedEvent?.spawn.pathReference?.overrides?.duration != nil }, set: { enabled in
+        mutateSpawn { spawn in
+            guard var reference = spawn.pathReference else { return }
+            var overrides = reference.overrides ?? .init()
+            let sourceDuration = workspace.path(for: reference)?.duration ?? 1
+            overrides.duration = enabled ? max(0.1, sourceDuration) : nil
+            reference.overrides = overrides.isEmpty ? nil : overrides
+            spawn.pathReference = reference
+        }
+    }) }
+    private func pathDurationOverrideBinding(fallback: Double) -> Binding<Double> { Binding(get: { selectedEvent?.spawn.pathReference?.overrides?.duration ?? fallback }, set: { value in
+        mutateSpawn { spawn in
+            guard var reference = spawn.pathReference else { return }
+            var overrides = reference.overrides ?? .init()
+            overrides.duration = max(0.1, value)
+            reference.overrides = overrides
+            spawn.pathReference = reference
+        }
+    }) }
     private var mirrorYBinding: Binding<Bool> { Binding(get: { selectedEvent?.spawn.pathTransform?.mirrorY ?? false }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.mirrorY = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }
     private var xOffsetBinding: Binding<Double> { Binding(get: { selectedEvent?.spawn.pathTransform?.xOffset ?? 0 }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.xOffset = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }
     private var yOffsetBinding: Binding<Double> { Binding(get: { selectedEvent?.spawn.pathTransform?.yOffset ?? 0 }, set: { value in mutateSpawn { spawn in var transform = spawn.pathTransform ?? .init(); transform.yOffset = value; spawn.pathTransform = transform.isIdentity ? nil : transform } }) }

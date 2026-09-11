@@ -375,6 +375,11 @@ final class EditorWorkspace: ObservableObject {
         return choreographies.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
     }
 
+    func choreographyDocument(for reference: ChoreographyReference?) -> ChoreographyEditorDocument? {
+        guard let resourcePath = reference?.resourcePath else { return nil }
+        return choreographies.first { self.resourcePath(for: $0.fileURL) == resourcePath }
+    }
+
     func usages(ofChoreography document: ChoreographyEditorDocument) -> [ContentUsage] {
         let path = resourcePath(for: document.fileURL)
         return missions.flatMap { mission in
