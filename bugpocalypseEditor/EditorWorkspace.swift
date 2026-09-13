@@ -366,8 +366,12 @@ final class EditorWorkspace: ObservableObject {
     }
 
     func mission(for resourcePath: String?) -> MissionDefinition? {
+        missionDocument(for: resourcePath)?.definition
+    }
+
+    func missionDocument(for resourcePath: String?) -> MissionDocument? {
         guard let resourcePath else { return nil }
-        return missions.first { self.resourcePath(for: $0.fileURL) == resourcePath }?.definition
+        return missions.first { self.resourcePath(for: $0.fileURL) == resourcePath }
     }
 
     func choreography(for reference: ChoreographyReference?) -> ChoreographyDocument? {
@@ -649,6 +653,10 @@ final class EditorWorkspace: ObservableObject {
 
     func updateSelectedMission(_ change: (inout MissionDefinition) -> Void) {
         guard let document = selectedMission else { return }
+        updateMission(document, change)
+    }
+
+    func updateMission(_ document: MissionDocument, _ change: (inout MissionDefinition) -> Void) {
         var value = document.definition
         change(&value)
         document.definition = value

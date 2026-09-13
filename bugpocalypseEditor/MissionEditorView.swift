@@ -612,6 +612,7 @@ struct MissionInspector: View {
                 Button("Add Objective") { addObjective() }
                     .disabled(mission.metadata.starObjectives.count >= 3)
             }
+            MissionRewardsEditor(rewards: missionBinding(\.rewards, fallback: mission.rewards))
         }
     }
 
@@ -1190,6 +1191,80 @@ struct MissionInspector: View {
     private func defaultPath(_ kind: MovementPathKind) -> MovementPathDefinition { switch kind { case .straight: .straight(.init(speed: 120)); case .sine: .sine(.init(speed: 120, amplitude: 40, frequency: 0.5)); case .waypoints: .waypoints(.init(duration: 6, points: [.init(x: 1.1, y: 0.5), .init(x: 0.65, y: 0.3), .init(x: -0.1, y: 0.5)])); case .bezier: .bezier(.init(duration: 4, start: .init(x: 1.1, y: 0.5), control1: .init(x: 0.8, y: 0.05), control2: .init(x: 0.2, y: 0.95), end: .init(x: -0.1, y: 0.5))) } }
     private func humanize(_ text: String) -> String { text.reduce(into: "") { result, character in if character.isUppercase { result.append(" ") }; result.append(character) }.capitalized }
 }
+
+/// The three mission payouts are authored with the mission itself, whether it
+/// is being edited from the mission list or through its world-map cell.
+struct MissionRewardsEditor: View {
+    @Binding var rewards: MissionRewards
+
+    var body: some View {
+        Section("First Completion Reward") {
+            Toggle("Enabled", isOn: firstCompletionEnabled)
+            if let reward = rewards.firstCompletion {
+                oneTimeFields(reward, binding: firstCompletionBinding)
+            }
+        }
+        Section("Replay Completion Reward") {
+            Toggle("Enabled", isOn: replayCompletionEnabled)
+            if let reward = rewards.replayCompletion {
+                currencyFields(reward, binding: replayCompletionBinding)
+            }
+        }
+        Section("First Three Stars Reward") {
+            Toggle("Enabled", isOn: firstThreeStarsEnabled)
+            if let reward = rewards.firstThreeStars {
+                oneTimeFields(reward, binding: firstThreeStarsBinding)
+            }
+        }
+    }
+
+    @ViewBuilder private func oneTimeFields(_ reward: MissionOneTimeReward, binding: Binding<MissionOneTimeReward>) -> some View {
+        TextField("Reward ID", text: Binding(
+            get: { binding.wrappedValue.id },
+            set: { value in
+                var updated = binding.wrappedValue
+                updated.id = value
+                binding.wrappedValue = updated
+            }
+        ))
+        currencyFields(reward, binding: binding)
+    }
+
+    @ViewBuilder private func currencyFields<Reward>(_ reward: Reward, binding: Binding<Reward>) -> some View where Reward: MissionRewardCurrencyFields {
+        TextField("Coins", value: currencyBinding(binding, \.coins), format: .number)
+        TextField("Power points", value: currencyBinding(binding, \.powerPoints), format: .number)
+        TextField("Skill points", value: currencyBinding(binding, \.skillPoints), format: .number)
+    }
+
+    private var firstCompletionEnabled: Binding<Bool> { optionalBinding(\.firstCompletion, default: .init(id: "first_completion_v1", coins: 0, powerPoints: 0, skillPoints: 0)) }
+    private var replayCompletionEnabled: Binding<Bool> { optionalBinding(\.replayCompletion, default: .init(coins: 0, powerPoints: 0, skillPoints: 0)) }
+    private var firstThreeStarsEnabled: Binding<Bool> { optionalBinding(\.firstThreeStars, default: .init(id: "first_three_stars_v1", coins: 0, powerPoints: 0, skillPoints: 0)) }
+
+    private var firstCompletionBinding: Binding<MissionOneTimeReward> { requiredBinding(\.firstCompletion, default: .init(id: "first_completion_v1", coins: 0, powerPoints: 0, skillPoints: 0)) }
+    private var replayCompletionBinding: Binding<MissionCurrencyReward> { requiredBinding(\.replayCompletion, default: .init(coins: 0, powerPoints: 0, skillPoints: 0)) }
+    private var firstThreeStarsBinding: Binding<MissionOneTimeReward> { requiredBinding(\.firstThreeStars, default: .init(id: "first_three_stars_v1", coins: 0, powerPoints: 0, skillPoints: 0)) }
+
+    private func optionalBinding<Reward>(_ keyPath: WritableKeyPath<MissionRewards, Reward?>, default value: Reward) -> Binding<Bool> {
+        Binding(get: { rewards[keyPath: keyPath] != nil }, set: { enabled in rewards[keyPath: keyPath] = enabled ? (rewards[keyPath: keyPath] ?? value) : nil })
+    }
+
+    private func requiredBinding<Reward>(_ keyPath: WritableKeyPath<MissionRewards, Reward?>, default value: Reward) -> Binding<Reward> {
+        Binding(get: { rewards[keyPath: keyPath] ?? value }, set: { rewards[keyPath: keyPath] = $0 })
+    }
+
+    private func currencyBinding<Reward>(_ binding: Binding<Reward>, _ keyPath: WritableKeyPath<Reward, Int>) -> Binding<Int> {
+        Binding(get: { binding.wrappedValue[keyPath: keyPath] }, set: { value in var reward = binding.wrappedValue; reward[keyPath: keyPath] = max(0, value); binding.wrappedValue = reward })
+    }
+}
+
+private protocol MissionRewardCurrencyFields {
+    var coins: Int { get set }
+    var powerPoints: Int { get set }
+    var skillPoints: Int { get set }
+}
+
+extension MissionOneTimeReward: MissionRewardCurrencyFields {}
+extension MissionCurrencyReward: MissionRewardCurrencyFields {}
 
 /// Shared encounter attack controls used by mission and choreography spawns.
 struct FormationAttackEditor: View {

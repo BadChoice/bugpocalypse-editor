@@ -360,6 +360,12 @@ struct WorldInspector: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
+                if let document = workspace.missionDocument(for: cell.missionResourcePath) {
+                    MissionRewardsEditor(rewards: Binding(
+                        get: { document.definition.rewards },
+                        set: { rewards in workspace.updateMission(document) { $0.rewards = rewards } }
+                    ))
+                }
             }
             Section {
                 Button("Delete Cell", role: .destructive) { workspace.deleteSelectedCell() }
