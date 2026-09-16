@@ -198,6 +198,7 @@ struct bugpocalypseEditorTests {
         workspace.selectMission(workspace.missions[0])
         #expect(workspace.selectedMission?.definition.metadata.displayName == "Test Mission")
         #expect(workspace.diagnostics.isEmpty)
+        workspace.updateSelectedMission { $0.enemyLevelOffset = 4 }
 
         workspace.addMissionEvent(.zoomOut(.init(multiplier: 0.8, duration: 1)))
         let bossPath = MovementPathDefinition.waypoints(.init(
@@ -216,6 +217,7 @@ struct bugpocalypseEditorTests {
             MissionDefinition.self,
             from: Data(contentsOf: root.appendingPathComponent("godot/assets/missions/test/1.json"))
         )
+        #expect(saved.enemyLevelOffset == 4)
         #expect(saved.timeline.count == 3)
         guard case let .spawnBoss(boss)? = saved.timeline.last?.action else {
             Issue.record("The saved mission did not preserve the boss spawn event")

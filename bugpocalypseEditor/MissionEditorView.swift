@@ -288,7 +288,7 @@ struct MissionPreview: View {
                     if case let .spawnFormation(spawn) = event.action,
                        event.at <= playhead,
                        playhead - event.at <= maximumPreviewLifetime {
-                        formation(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, selectedMember: selectedEventIndex == index ? selectedMemberIndex : nil, origin: origin, scale: scale)
+                        formation(adjustedSpawn(spawn, by: mission.enemyLevelOffset ?? 0), eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, selectedMember: selectedEventIndex == index ? selectedMemberIndex : nil, origin: origin, scale: scale)
                     }
                     if case let .playChoreography(play) = event.action {
                         choreography(play, missionEventIndex: index, missionEventTime: event.at, origin: origin, scale: scale)
@@ -296,7 +296,7 @@ struct MissionPreview: View {
                     if case let .spawnBoss(spawn) = event.action,
                        event.at <= playhead,
                        playhead - event.at <= maximumPreviewLifetime {
-                        boss(spawn, eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
+                        boss(adjustedBoss(spawn, by: mission.enemyLevelOffset ?? 0), eventIndex: index, eventTime: event.at, elapsed: playhead - event.at, selected: selectedEventIndex == index, origin: origin, scale: scale)
                     }
                 }
                 Text("640 × 360  •  t = \(playhead, specifier: "%.2f") s")
@@ -328,7 +328,7 @@ struct MissionPreview: View {
             ForEach(Array(choreography.timeline.enumerated()), id: \.offset) { _, child in
                 let spawnTime = missionEventTime + child.at
                 if spawnTime <= playhead, playhead - spawnTime <= maximumPreviewLifetime {
-                    formation(adjustedSpawn(child.spawn, by: play.enemyLevelOffset ?? 0), eventIndex: missionEventIndex, eventTime: spawnTime, elapsed: playhead - spawnTime, selected: selectedEventIndex == missionEventIndex, selectedMember: nil, origin: origin, scale: scale)
+                    formation(adjustedSpawn(child.spawn, by: combinedOffset(mission.enemyLevelOffset ?? 0, play.enemyLevelOffset ?? 0)), eventIndex: missionEventIndex, eventTime: spawnTime, elapsed: playhead - spawnTime, selected: selectedEventIndex == missionEventIndex, selectedMember: nil, origin: origin, scale: scale)
                 }
             }
         }
@@ -339,6 +339,19 @@ struct MissionPreview: View {
         let (level, overflow) = spawn.enemy.level.addingReportingOverflow(offset)
         result.enemy.level = overflow ? (offset >= 0 ? Int.max : 1) : max(1, level)
         return result
+    }
+
+    private func adjustedBoss(_ boss: SpawnBossEvent, by offset: Int) -> SpawnBossEvent {
+        var result = boss
+        let (level, overflow) = boss.level.addingReportingOverflow(offset)
+        result.level = overflow ? (offset >= 0 ? Int.max : 1) : max(1, level)
+        return result
+    }
+
+    private func combinedOffset(_ lhs: Int, _ rhs: Int) -> Int {
+        let (combined, overflow) = lhs.addingReportingOverflow(rhs)
+        guard overflow else { return combined }
+        return lhs >= 0 && rhs >= 0 ? Int.max : Int.min
     }
 
     @ViewBuilder
@@ -584,6 +597,8 @@ struct MissionInspector: View {
                 }
                 Stepper("Number: \(mission.metadata.missionNumber)", value: missionBinding(\.metadata.missionNumber, fallback: mission.metadata.missionNumber), in: 1...999)
                 Stepper("Hero level: \(mission.metadata.recommendedHeroLevel)", value: missionBinding(\.metadata.recommendedHeroLevel, fallback: mission.metadata.recommendedHeroLevel), in: 1...999)
+                Stepper("Enemy level offset: \(mission.enemyLevelOffset ?? 0)", value: missionEnemyLevelOffsetBinding, in: -99...99)
+                    .help("Applies to direct formations, choreographies, and bosses. Choreography offsets are added on top.")
                 TextField("Location ID", text: missionBinding(\.metadata.locationId, fallback: mission.metadata.locationId))
             }
             Section("Presentation") {
@@ -956,6 +971,16 @@ struct MissionInspector: View {
                 guard case var .playChoreography(value) = event.action else { return }
                 value.enemyLevelOffset = offset == 0 ? nil : offset
                 event.action = .playChoreography(value)
+            }
+        })
+    }
+
+    private var missionEnemyLevelOffsetBinding: Binding<Int> {
+        Binding(get: {
+            workspace.selectedMission?.definition.enemyLevelOffset ?? 0
+        }, set: { offset in
+            workspace.updateSelectedMission {
+                $0.enemyLevelOffset = offset == 0 ? nil : offset
             }
         })
     }
