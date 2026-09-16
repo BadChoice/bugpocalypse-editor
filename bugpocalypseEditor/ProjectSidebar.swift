@@ -1,9 +1,16 @@
 import BugpocalypseContent
 import SwiftUI
 
+private struct MissionWorldGroup: Identifiable {
+    let id: String
+    let name: String
+    let missions: [MissionDocument]
+}
+
 struct ProjectSidebar: View {
     @ObservedObject var workspace: EditorWorkspace
     @State private var expandedSections = Set(EditorSection.allCases)
+    @State private var expandedMissionWorldIDs = Set<String>()
 
     var body: some View {
         List(selection: $workspace.selection) {
@@ -29,24 +36,23 @@ struct ProjectSidebar: View {
                         }
                     }
                     if section == .missions {
-                        ForEach(filteredMissions) { document in
-                            HStack(spacing: 7) {
-                                Image(systemName: "flag.fill").foregroundStyle(.secondary)
-                                Text(document.definition.metadata.displayName).lineLimit(1)
-                                Spacer(minLength: 4)
-                                Text("M\(document.definition.metadata.missionNumber)")
-                                    .font(.caption2.bold()).foregroundStyle(.secondary)
-                                Text("\(document.definition.timeline.count)")
-                                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                if document.definition.authoringStatus == .draft {
-                                    Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange)
+                        ForEach(missionWorldGroups) { group in
+                            DisclosureGroup(isExpanded: missionWorldExpansionBinding(for: group.id)) {
+                                ForEach(group.missions) { document in
+                                    missionRow(document)
+                                        .padding(.leading, 32)
+                                        .tag(EditorSelection.mission(document.fileURL))
                                 }
-                                if document.isDirty {
-                                    Circle().fill(.orange).frame(width: 7, height: 7)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: "globe.americas.fill").foregroundStyle(.secondary)
+                                    Text(group.name).lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    Text("\(group.missions.count)")
+                                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.leading, 16)
-                            .tag(EditorSelection.mission(document.fileURL))
                         }
                     }
                     if section == .choreographies {
@@ -155,6 +161,16 @@ struct ProjectSidebar: View {
         )
     }
 
+    private func missionWorldExpansionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedMissionWorldIDs.contains(id) },
+            set: { isExpanded in
+                if isExpanded { expandedMissionWorldIDs.insert(id) }
+                else { expandedMissionWorldIDs.remove(id) }
+            }
+        )
+    }
+
     private var filteredWorlds: [WorldDocument] {
         guard !workspace.searchText.isEmpty else { return workspace.worlds }
         return workspace.worlds.filter {
@@ -168,6 +184,60 @@ struct ProjectSidebar: View {
         return workspace.missions.filter {
             $0.definition.metadata.displayName.localizedCaseInsensitiveContains(workspace.searchText) ||
             $0.definition.id.localizedCaseInsensitiveContains(workspace.searchText)
+        }
+    }
+
+    private var missionWorldGroups: [MissionWorldGroup] {
+        let isFiltering = !workspace.searchText.isEmpty
+        var assignedMissionURLs = Set<URL>()
+        var groups: [MissionWorldGroup] = []
+
+        for world in workspace.worlds {
+            let linkedPaths = Set(world.definition.cells.compactMap(\.missionResourcePath))
+            let missions = filteredMissions.filter { mission in
+                guard !assignedMissionURLs.contains(mission.fileURL) else { return false }
+                let isLinked = workspace.resourcePath(for: mission.fileURL)
+                    .map(linkedPaths.contains) ?? false
+                return isLinked ||
+                    mission.definition.metadata.locationId == world.definition.id
+            }
+            assignedMissionURLs.formUnion(missions.map { $0.fileURL })
+            if !isFiltering || !missions.isEmpty {
+                groups.append(.init(
+                    id: "world:\(world.definition.id)",
+                    name: world.definition.displayName,
+                    missions: missions
+                ))
+            }
+        }
+
+        let unassigned = filteredMissions.filter { !assignedMissionURLs.contains($0.fileURL) }
+        let locationIDs = Set(unassigned.map { $0.definition.metadata.locationId })
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        groups.append(contentsOf: locationIDs.compactMap { locationID in
+            let missions = unassigned.filter { $0.definition.metadata.locationId == locationID }
+            guard !missions.isEmpty else { return nil }
+            return .init(id: "location:\(locationID)", name: locationID, missions: missions)
+        })
+        return groups
+    }
+
+    @ViewBuilder
+    private func missionRow(_ document: MissionDocument) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "flag.fill").foregroundStyle(.secondary)
+            Text(document.definition.metadata.displayName).lineLimit(1)
+            Spacer(minLength: 4)
+            Text("M\(document.definition.metadata.missionNumber)")
+                .font(.caption2.bold()).foregroundStyle(.secondary)
+            Text("\(document.definition.timeline.count)")
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            if document.definition.authoringStatus == .draft {
+                Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange)
+            }
+            if document.isDirty {
+                Circle().fill(.orange).frame(width: 7, height: 7)
+            }
         }
     }
 

@@ -303,6 +303,7 @@ struct WorldInspector: View {
         Section("World") {
             TextField("Name", text: worldBinding(\.displayName, fallback: workspace.selectedWorld?.definition.displayName ?? ""))
             TextField("ID", text: worldBinding(\.id, fallback: workspace.selectedWorld?.definition.id ?? ""))
+            TextField("Tile asset folder", text: worldBinding(\.tileAssetDirectory, fallback: workspace.selectedWorld?.definition.tileAssetDirectory ?? "world/1"))
             Picker("Status", selection: worldBinding(\.authoringStatus, fallback: workspace.selectedWorld?.definition.authoringStatus ?? .draft)) {
                 ForEach(AuthoringStatus.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
@@ -328,11 +329,12 @@ struct WorldInspector: View {
                     ForEach(WorldCellKind.allCases, id: \.self) { Text(kindTitle($0)).tag($0) }
                 }
                 Picker("Tile", selection: cellBinding(\.tileName, fallback: cell.tileName)) {
-                    if !workspace.availableWorldTiles.contains(cell.tileName) {
+                    let tiles = workspace.selectedWorld.map { workspace.availableWorldTiles(for: $0.definition) } ?? []
+                    if !tiles.contains(cell.tileName) {
                         Text("Missing: \(cell.tileName)").tag(cell.tileName)
                     }
-                    ForEach(workspace.availableWorldTiles, id: \.self) { tileName in
-                        Label(tileName.replacingOccurrences(of: "world/", with: ""), systemImage: "photo")
+                    ForEach(tiles, id: \.self) { tileName in
+                        Label(tileName.replacingOccurrences(of: "\(workspace.selectedWorld?.definition.tileAssetDirectory ?? "")/", with: ""), systemImage: "photo")
                             .tag(tileName)
                     }
                 }
@@ -355,6 +357,13 @@ struct WorldInspector: View {
                     if let mission = workspace.mission(for: cell.missionResourcePath) {
                         Label("Mission \(mission.metadata.missionNumber)", systemImage: "number.circle.fill")
                             .foregroundStyle(.secondary)
+                    }
+                    if let document = workspace.missionDocument(for: cell.missionResourcePath) {
+                        Button {
+                            workspace.selectMission(document)
+                        } label: {
+                            Label("Open Mission Editor", systemImage: "arrow.up.right.square")
+                        }
                     } else if [.mission, .boss].contains(cell.kind), cell.missionResourcePath == nil {
                         Button("Create Mission Definition", action: workspace.createMissionDefinitionForSelectedCell)
                             .buttonStyle(.borderedProminent)

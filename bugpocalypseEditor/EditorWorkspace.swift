@@ -761,7 +761,7 @@ final class EditorWorkspace: ObservableObject {
         var suffix = document.definition.cells.count + 1
         while document.definition.cell(id: "cell_\(suffix)") != nil { suffix += 1 }
         let cell = WorldCellDefinition(
-            id: "cell_\(suffix)", coordinate: coordinate, tileName: "world/road.png",
+            id: "cell_\(suffix)", coordinate: coordinate, tileName: defaultTileName(for: document.definition),
             kind: .exploration, displayName: "New Cell", isInitiallyRevealed: false,
             scoutEnergyCost: 1, neighbourIDs: []
         )
@@ -1046,11 +1046,13 @@ final class EditorWorkspace: ObservableObject {
         return NSImage(cgImage: cropped, size: rect.size)
     }
 
-    /// Tile resources the world editor can author. Paths stay relative to the
-    /// game's `assets` folder so they match the runtime atlas naming scheme.
-    var availableWorldTiles: [String] {
+    /// Tile resources for one world. Paths remain relative to the game's
+    /// `assets` folder so they match the runtime atlas naming scheme.
+    func availableWorldTiles(for world: WorldDefinition) -> [String] {
         guard let projectRoot else { return [] }
-        let directory = projectRoot.appendingPathComponent("assets/world", isDirectory: true)
+        let tileDirectory = world.tileAssetDirectory.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !tileDirectory.isEmpty else { return [] }
+        let directory = projectRoot.appendingPathComponent("assets").appendingPathComponent(tileDirectory, isDirectory: true)
         guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
@@ -1060,8 +1062,12 @@ final class EditorWorkspace: ObservableObject {
         let supportedExtensions = Set(["png", "jpg", "jpeg", "webp"])
         return files
             .filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
-            .map { "world/\($0.lastPathComponent)" }
+            .map { "\(tileDirectory)/\($0.lastPathComponent)" }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func defaultTileName(for world: WorldDefinition) -> String {
+        availableWorldTiles(for: world).first ?? "\(world.tileAssetDirectory)/empty.png"
     }
 
     private func isValidProjectRoot(_ url: URL) -> Bool {
