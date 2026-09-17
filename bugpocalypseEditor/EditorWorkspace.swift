@@ -989,8 +989,8 @@ final class EditorWorkspace: ObservableObject {
     }
 
     func enemyAssetURL(for enemyID: String) -> URL? {
-        guard let entry = EnemyCatalogue.entry(for: enemyID) else { return nil }
-        return assetURL(for: entry.previewAssetName + ".png")
+        guard let firstIdleFrame = EnemyCatalogue.entry(for: enemyID)?.spriteSet?.idle.first else { return nil }
+        return assetURL(for: firstIdleFrame + ".png")
     }
 
     /// Enemy art is packed into `textures.1.png` for the game. The editor
@@ -998,9 +998,9 @@ final class EditorWorkspace: ObservableObject {
     /// keeps the preview's visual scale faithful to runtime.
     func enemyPreviewImage(for enemyID: String) -> NSImage? {
         if let image = enemyPreviewCache[enemyID] { return image }
-        guard let entry = EnemyCatalogue.entry(for: enemyID),
+        guard let firstIdleFrame = EnemyCatalogue.entry(for: enemyID)?.spriteSet?.idle.first,
               let projectRoot,
-              let image = atlasImage(named: entry.previewAssetName + ".png", projectRoot: projectRoot) else {
+              let image = atlasImage(named: firstIdleFrame + ".png", projectRoot: projectRoot) else {
             return enemyAssetURL(for: enemyID).flatMap(NSImage.init(contentsOf:))
         }
         enemyPreviewCache[enemyID] = image
