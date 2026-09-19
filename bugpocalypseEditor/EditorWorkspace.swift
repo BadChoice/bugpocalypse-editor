@@ -312,7 +312,7 @@ final class EditorWorkspace: ObservableObject {
             let choreographiesURL = root.appendingPathComponent("godot/assets/choreographies", isDirectory: true)
             choreographies = try recursiveJSONFiles(at: choreographiesURL).map { url in
                 ChoreographyEditorDocument(fileURL: url, definition: try ContentJSON.decode(ChoreographyDocument.self, from: Data(contentsOf: url)))
-            }.sorted { $0.definition.id.localizedStandardCompare($1.definition.id) == .orderedAscending }
+            }.sorted(by: choreographySort)
 
             let resolvedRoot = root.standardizedFileURL
             projectRoot = resolvedRoot
@@ -470,6 +470,7 @@ final class EditorWorkspace: ObservableObject {
         var value = document.definition
         change(&value)
         document.definition = value
+        choreographies.sort(by: choreographySort)
         objectWillChange.send()
     }
 
@@ -496,15 +497,22 @@ final class EditorWorkspace: ObservableObject {
             var suffix = choreographies.count + 1
             while existingIDs.contains("choreography_\(suffix)") { suffix += 1 }
             let id = "choreography_\(suffix)"
-            let definition = ChoreographyDocument(schemaVersion: 1, id: id, name: "New Choreography", authoringStatus: .draft, timeline: [])
+            let definition = ChoreographyDocument(schemaVersion: 1, id: id, name: "New Choreography", difficulty: 1, authoringStatus: .draft, timeline: [])
             let url = directory.appendingPathComponent("\(id).json")
             try ContentJSON.encode(definition).write(to: url, options: .atomic)
             let document = ChoreographyEditorDocument(fileURL: url, definition: definition)
             choreographies.append(document)
-            choreographies.sort { $0.definition.id.localizedStandardCompare($1.definition.id) == .orderedAscending }
+            choreographies.sort(by: choreographySort)
             selectChoreography(document)
             statusMessage = "Created \(url.lastPathComponent)"
         } catch { errorMessage = "The choreography could not be created: \(error.localizedDescription)" }
+    }
+
+    private func choreographySort(_ lhs: ChoreographyEditorDocument, _ rhs: ChoreographyEditorDocument) -> Bool {
+        if lhs.definition.difficulty != rhs.definition.difficulty {
+            return lhs.definition.difficulty < rhs.definition.difficulty
+        }
+        return lhs.definition.name.localizedStandardCompare(rhs.definition.name) == .orderedAscending
     }
 
     func addChoreographySpawn() {

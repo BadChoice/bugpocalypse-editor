@@ -603,6 +603,9 @@ struct MissionInspector: View {
             }
             Section("Presentation") {
                 TextField("Background", text: missionBinding(\.background.resourcePath, fallback: mission.background.resourcePath))
+                Picker("Elemental threat", selection: missionBinding(\.elementalThreat, fallback: mission.elementalThreat)) {
+                    ForEach(MissionElementalThreat.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
+                }
                 Stepper("Seed: \(mission.background.seed ?? 0)", value: optionalSeedBinding, in: 0...9999)
                 Picker("Completion", selection: missionBinding(\.completion.kind, fallback: mission.completion.kind)) {
                     ForEach(MissionCompletionKind.allCases, id: \.self) { Text(humanize($0.rawValue)).tag($0) }
@@ -661,7 +664,7 @@ struct MissionInspector: View {
         Section("Choreography") {
             Picker("Resource", selection: choreographyReferencePathBinding) {
                 ForEach(workspace.choreographies) { document in
-                    Text(document.definition.name).tag(workspace.resourcePath(for: document.fileURL) ?? "")
+                    Text("D\(document.definition.difficulty) · \(document.definition.name)").tag(workspace.resourcePath(for: document.fileURL) ?? "")
                 }
             }
             if let choreography = workspace.choreographyDocument(for: play.choreographyReference) {
@@ -1259,6 +1262,7 @@ struct MissionRewardsEditor: View {
         TextField("Coins", value: currencyBinding(binding, \.coins), format: .number)
         TextField("Power points", value: currencyBinding(binding, \.powerPoints), format: .number)
         TextField("Skill points", value: currencyBinding(binding, \.skillPoints), format: .number)
+        TextField("Energy", value: currencyBinding(binding, \.energy), format: .number)
     }
 
     private var firstCompletionEnabled: Binding<Bool> { optionalBinding(\.firstCompletion, default: .init(id: "first_completion_v1", coins: 0, powerPoints: 0, skillPoints: 0)) }
@@ -1286,6 +1290,7 @@ private protocol MissionRewardCurrencyFields {
     var coins: Int { get set }
     var powerPoints: Int { get set }
     var skillPoints: Int { get set }
+    var energy: Int { get set }
 }
 
 extension MissionOneTimeReward: MissionRewardCurrencyFields {}

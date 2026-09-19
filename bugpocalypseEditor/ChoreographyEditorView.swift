@@ -168,10 +168,11 @@ struct ChoreographyInspector: View {
         Section("Choreography") {
             TextField("Name", text: documentBinding(\.name, fallback: document.definition.name))
             TextField("ID", text: documentBinding(\.id, fallback: document.definition.id))
+            Stepper("Difficulty: \(document.definition.difficulty)", value: documentBinding(\.difficulty, fallback: document.definition.difficulty), in: 1...10)
             Picker("Status", selection: documentBinding(\.authoringStatus, fallback: document.definition.authoringStatus)) {
                 ForEach(AuthoringStatus.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
-            Text("A choreography has only a local spawn timeline. Drops remain on each formation spawn.")
+            Text("Difficulty is an authoring estimate only. A choreography has only a local spawn timeline; drops remain on each formation spawn.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

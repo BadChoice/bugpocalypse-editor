@@ -61,6 +61,7 @@ struct ProjectSidebar: View {
                                 Image(systemName: "square.stack.3d.up.fill").foregroundStyle(.secondary)
                                 Text(document.definition.name).lineLimit(1)
                                 Spacer(minLength: 4)
+                                Text("D\(document.definition.difficulty)").font(.caption2.bold()).foregroundStyle(.secondary)
                                 Text("\(document.definition.timeline.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                                 if document.definition.authoringStatus == .draft { Text("DRAFT").font(.caption2.bold()).foregroundStyle(.orange) }
                                 if document.isDirty { Circle().fill(.orange).frame(width: 7, height: 7) }
