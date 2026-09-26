@@ -1001,57 +1001,24 @@ final class EditorWorkspace: ObservableObject {
         return assetURL(for: firstIdleFrame + ".png")
     }
 
-    /// Enemy art is packed into `textures.1.png` for the game. The editor
-    /// reads the same atlas rather than substituting a generic icon, which
-    /// keeps the preview's visual scale faithful to runtime.
+    /// The editor reads the authored PNG directly. It deliberately does not
+    /// reconstruct TexturePacker's trimmed atlas: the preview needs a stable,
+    /// unshifted source image rather than runtime texture extraction details.
     func enemyPreviewImage(for enemyID: String) -> NSImage? {
         if let image = enemyPreviewCache[enemyID] { return image }
-        guard let firstIdleFrame = EnemyCatalogue.entry(for: enemyID)?.spriteSet?.idle.first,
-              let projectRoot,
-              let image = atlasImage(named: firstIdleFrame + ".png", projectRoot: projectRoot) else {
-            return enemyAssetURL(for: enemyID).flatMap(NSImage.init(contentsOf:))
-        }
+        guard let url = enemyAssetURL(for: enemyID),
+              let sourceImage = NSImage(contentsOf: url),
+              let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+
+        // Some original PNGs (the workers) are tagged at 300 DPI while most
+        // sprites are 72 DPI. NSImage turns that metadata into a much smaller
+        // point size, so always use the raster's pixel dimensions in preview.
+        let image = NSImage(
+            cgImage: cgImage,
+            size: CGSize(width: cgImage.width, height: cgImage.height)
+        )
         enemyPreviewCache[enemyID] = image
         return image
-    }
-
-    private func atlasImage(named name: String, projectRoot: URL) -> NSImage? {
-        let atlasDirectory = projectRoot.appendingPathComponent("assets/textures", isDirectory: true)
-        let plistURL = atlasDirectory.appendingPathComponent("textures.plist")
-        guard let data = try? Data(contentsOf: plistURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
-              let dictionary = plist as? [String: Any],
-              let images = dictionary["images"] as? [[String: Any]],
-              let atlas = images.first(where: { image in
-                  (image["subimages"] as? [[String: Any]])?.contains { $0["name"] as? String == name } == true
-              }),
-              let subimage = (atlas["subimages"] as? [[String: Any]])?.first(where: { $0["name"] as? String == name }),
-              let rectText = subimage["textureRect"] as? String,
-              let atlasName = atlas["path"] as? String,
-              let atlasImage = NSImage(contentsOf: atlasDirectory.appendingPathComponent(atlasName)) else { return nil }
-
-        // The PNG carries orientation metadata. Its raw CGImage dimensions are
-        // transposed, while TexturePacker's rectangles describe the displayed
-        // (unrotated) atlas. Rasterize it first so both coordinate systems
-        // agree before extracting a subimage.
-        let normalizedAtlas = NSImage(size: atlasImage.size)
-        normalizedAtlas.lockFocus()
-        atlasImage.draw(
-            in: NSRect(origin: .zero, size: normalizedAtlas.size),
-            from: NSRect(origin: .zero, size: atlasImage.size),
-            operation: .copy,
-            fraction: 1
-        )
-        normalizedAtlas.unlockFocus()
-        guard let cgImage = normalizedAtlas.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-
-        let values = rectText.split { !( $0.isNumber || $0 == "-" || $0 == "." ) }.compactMap { token in
-            Double(String(token)).map { CGFloat($0) }
-        }
-        guard values.count == 4 else { return nil }
-        let rect = CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
-        guard let cropped = cgImage.cropping(to: rect) else { return nil }
-        return NSImage(cgImage: cropped, size: rect.size)
     }
 
     /// Tile resources for one world. Paths remain relative to the game's
